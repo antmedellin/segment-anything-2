@@ -1,0 +1,37 @@
+{
+
+    "image" : "sam2",
+
+    // this is similar to the docker compose file which can be used instead with: docker compose up
+
+    "mounts":[
+        // "source=${localWorkspaceFolder}/../../HyperWorkspace/HyperImages/LIB-HSI,target=/workspaces/LIB-HSI,type=bind,consistency=cached",
+        // "source=${localWorkspaceFolder}/../../HyperWorkspace/HyperImages/hyper_city2,target=/workspaces/hyper_city2,type=bind,consistency=cached"
+
+    ],
+
+    "runArgs":[
+
+        "--gpus=all",
+        "-e", "HOST_UID=$(id -u)",
+        "-e", "HOST_GID=$(id -g)",
+        "--shm-size=16g",
+    ],
+
+    "customizations": {
+		// Configure properties specific to VS Code.
+		"vscode": {
+		  // Add the IDs of extensions you want installed when the container is created.
+		  "extensions": [
+			"ms-python.python",
+			"ms-azuretools.vscode-docker",
+			"streetsidesoftware.code-spell-checker",
+      "ms-toolsai.jupyter",
+      "ms-toolsai.tensorboard"
+			],
+			
+		}
+	  },
+
+
+}

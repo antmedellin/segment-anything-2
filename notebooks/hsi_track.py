@@ -7,38 +7,6 @@ from sam2.build_sam import build_sam2_video_predictor
 import sys
 
 
-
-
-
-# choose model to use
-
-# sam2_checkpoint = "checkpoints/sam2_hiera_large.pt"
-# model_cfg = "sam2_hiera_l.yaml"
-
-sam2_checkpoint = "checkpoints/sam2_hiera_tiny.pt"
-model_cfg = "sam2_hiera_t.yaml"
-
-
-# choose video to track
-
-# `video_dir` a directory of JPEG frames with filenames like `<frame_index>.jpg`
-# video_dir = "notebooks/videos/bedroom"
-video_dir = "../hsi_tracking/datasets/training/HSI-VIS-FalseColor/automobile/automobile"
-# video_dir = "../hsi_tracking/datasets/training/HSI-VIS-FalseColor/ball/ball"
-
-results_output_dir = "notebooks/results"
-
-# reference https://www.hsitracking.com/contest/ 
-
-
-
-
-# start of code 
-
-
-
-
-
 def show_mask(mask, ax, obj_id=None, random_color=False):
     if random_color:
         color = np.concatenate([np.random.random(3), np.array([0.6])], axis=0)
@@ -62,15 +30,37 @@ def show_box(box, ax):
     x0, y0 = box[0], box[1]
     w, h = box[2] - box[0], box[3] - box[1]
     ax.add_patch(plt.Rectangle((x0, y0), w, h, edgecolor='green', facecolor=(0, 0, 0, 0), lw=2))
-    
-# Get the base name of the results_output_dir
-base_name = os.path.basename(video_dir)
-result_output_name = os.path.join(results_output_dir, base_name+".txt")
-  
-# Ensure results_output_dir exists
-if not os.path.exists(results_output_dir):
-    os.makedirs(results_output_dir)   
 
+
+# choose model to use
+
+# sam2_checkpoint = "checkpoints/sam2_hiera_large.pt"
+# model_cfg = "sam2_hiera_l.yaml"
+
+sam2_checkpoint = "checkpoints/sam2_hiera_tiny.pt"
+model_cfg = "sam2_hiera_t.yaml"
+
+
+# choose video to track
+
+# `video_dir` a directory of JPEG frames with filenames like `<frame_index>.jpg`
+# video_dir = "notebooks/videos/bedroom"
+# video_dir = "../hsi_tracking/datasets/training/HSI-VIS-FalseColor/automobile/automobile"
+# video_dir = "../hsi_tracking/datasets/training/HSI-VIS-FalseColor/ball/ball"
+
+results_output_dir = "notebooks/results/training/HSI-VIS-FalseColor"
+
+# reference https://www.hsitracking.com/contest/ 
+
+#print out all the directories in the datasets/training/HSI-VIS-FalseColor directory
+video_base_dir = "../hsi_tracking/datasets/training/HSI-VIS-FalseColor"
+video_sub_dirs = os.listdir(video_base_dir)
+
+# print(video_sub_dirs)
+
+
+
+# start of code 
 # select the device for computation
 if torch.cuda.is_available():
     device = torch.device("cuda")
@@ -93,154 +83,201 @@ elif device.type == "mps":
         "give numerically different outputs and sometimes degraded performance on MPS. "
         "See e.g. https://github.com/pytorch/pytorch/issues/84936 for a discussion."
     )
+# Ensure results_output_dir exists
+if not os.path.exists(results_output_dir):
+    os.makedirs(results_output_dir)   
+
+
     
 # initialize the predictor     
 predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device)
+    
+for current_video_sub_dir in video_sub_dirs:    
+    
+    
+    
+    # Get the base name of the results_output_dir
+    base_name = os.path.basename(current_video_sub_dir)
+    print(f"Processing {base_name}, directory number {video_sub_dirs.index(current_video_sub_dir)+1} of {len(video_sub_dirs)}")
+    
+    result_output_name = os.path.join(results_output_dir, base_name+".txt")
+    
+    
 
 
-
-# scan all the JPEG frame names in this directory and sort them by frame index
-frame_names = [
-    p for p in os.listdir(video_dir)
-    if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG"]
-]
-frame_names.sort(key=lambda p: int(os.path.splitext(p)[0]))
-
-
-# load the initialization box from the ground truth (assumes same for all video directories)
-ground_truth_file = os.path.join(video_dir, "groundtruth_rect.txt")
-
-# read the file 
-with open(ground_truth_file, 'r') as f:
-    lines = f.readlines()
-    # box = [int(x) for x in lines[0].split(',')] # '463\t146\t13\t10\t\n'
-    # print(lines)
-# print(len(lines), lines[0])
-
-# use tab as separator and strip the newline character
-box_base = [int(x) for x in lines[0].strip().split('\t')]
-#  The bounding box is represented by the centre location and its height and width. 
-# Convert box to a NumPy array of type np.float32
-box_base = np.array(box_base, dtype=np.float32)
-
-
-# box should be in fomrat [x0, y0, x1, y1] - origin is top left corner
-# (x_min, y_min, x_max, y_max) 
-
-x_min, y_min, width, height = box_base
-x_max = x_min + width
-y_max = y_min + height
-box = np.array([x_min, y_min, x_max, y_max], dtype=np.float32)
+    video_dir = os.path.join(video_base_dir, current_video_sub_dir)
+    # print(video_dir)
+    
+    # Check if the current path is a directory
+    if not os.path.isdir(video_dir):
+        print(f"Skipping {current_video_sub_dir} as it is not a directory.")
+        continue
+    
+    # # scan all the JPEG frame names in this directory and sort them by frame index
+    frame_names = [
+        p for p in os.listdir(video_dir)
+        if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG"]
+    ]
+    # print(f"Number of frames in video: {len(frame_names)}")#, first frame: {frame_names[0]}")
+    
+    if len(frame_names) == 0:
+        video_dir = os.path.join(video_base_dir, current_video_sub_dir,current_video_sub_dir)
+        # print(video_dir)
+        frame_names = [
+            p for p in os.listdir(video_dir)
+            if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG"]
+        ]
+        # print(f"Number of new frames in video: {len(frame_names)}")#, first frame: {frame_names[0]}")
+    
+    if len(frame_names) == 0:
+        print(f"No frames found in {current_video_sub_dir}")
+        continue
+    
+    frame_names.sort(key=lambda p: int(os.path.splitext(p)[0]))
 
 
-
-
-# # take a look the first video frame
-# frame_idx = 0
-# plt.figure(figsize=(9, 6))
-# plt.title(f"frame {frame_idx}")
-# plt.imshow(Image.open(os.path.join(video_dir, frame_names[frame_idx])))
-# plt.show()
-
-inference_state = predictor.init_state(video_path=video_dir)
-
-# below line is only needed when previous tracking is done and we want to reset the state
-# predictor.reset_state(inference_state)
-
-
-ann_frame_idx = 0  # the frame index we interact with
-ann_obj_id = 1  # give a unique id to each object we interact with (it can be any integers)
-
-frame_idx , out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
-    inference_state=inference_state,
-    frame_idx=ann_frame_idx,
-    obj_id=ann_obj_id,
-    # points=points,
-    # labels=labels,
-    box = box,
-)
-
-
-# print(frame_idx , out_obj_ids, out_mask_logits)
-
-# # show the results on the current (interacted) frame
-# plt.figure(figsize=(9, 6))
-# plt.title(f"frame {ann_frame_idx}")
-# plt.imshow(Image.open(os.path.join(video_dir, frame_names[ann_frame_idx])))
-# # show_points(points, labels, plt.gca())
-# show_box(box, plt.gca())
-# show_mask((out_mask_logits[0] > 0.0).cpu().numpy(), plt.gca(), obj_id=out_obj_ids[0])
-# plt.show()
-
-
-# below allows us to generate the box around the object
-# Convert out_mask_logits to a binary mask
-binary_mask = (out_mask_logits[0] > 0.0).cpu().numpy()
-# Squeeze the binary_mask to remove the extra dimension
-binary_mask = np.squeeze(binary_mask)
-
-# Find the coordinates of the non-zero elements in the mask
-non_zero_coords = np.argwhere(binary_mask)
-
-# Calculate the bounding box coordinates
-y_min = np.min(non_zero_coords[:, 0])
-x_min = np.min(non_zero_coords[:, 1])
-y_max = np.max(non_zero_coords[:, 0])
-x_max = np.max(non_zero_coords[:, 1])
-
-# Create the bounding box
-new_box = np.array([x_min, y_min, x_max, y_max], dtype=np.float32)
-
-# print("reference box", box, "output box", new_box)
-
-# plt.imshow(binary_mask)
-# plt.show()
-# sys.exit(0)
-
-# run propagation throughout the video and collect the results in a dict
-video_segments = {}  # video_segments contains the per-frame segmentation results
-output_track_boxes = []  # output_track_boxes contains the per-frame tracking results
-for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state):
-    video_segments[out_frame_idx] = {
-        out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
-        for i, out_obj_id in enumerate(out_obj_ids)
-    }
-    try: 
-        result_mask = np.squeeze((out_mask_logits[0] > 0.0).cpu().numpy()) # squeeze to remove the extra dimension since only doing 1 object
-        non_zero_coords = np.argwhere(result_mask)
-        y_min = np.min(non_zero_coords[:, 0])
-        x_min = np.min(non_zero_coords[:, 1])
-        y_max = np.max(non_zero_coords[:, 0])
-        x_max = np.max(non_zero_coords[:, 1])
-        result_box = np.array([x_min, y_min, x_max, y_max], dtype=np.float32)
-        output_track_boxes.append(result_box)
+    # load the initialization box from the ground truth (assumes same for all video directories)
+    try:
+        # read the file 
+        ground_truth_file = os.path.join(video_dir, "groundtruth_rect.txt")
+        with open(ground_truth_file, 'r') as f:
+            lines = f.readlines()
+            # box = [int(x) for x in lines[0].split(',')] # '463\t146\t13\t10\t\n'
+        # print(lines)
+        # print(len(lines), lines[0])
     except:
-        # no object detected
-        output_track_boxes.append([0, 0, 0, 0])
-    
+        print(f"Could not find groundtruth_rect.txt in {current_video_sub_dir}")
+        continue
 
-# # render the segmentation results every few frames
-# vis_frame_stride = 30
-# plt.close("all")
-# for out_frame_idx in range(0, len(frame_names), vis_frame_stride):
-#     plt.figure(figsize=(6, 4))
-#     plt.title(f"frame {out_frame_idx}")
-#     plt.imshow(Image.open(os.path.join(video_dir, frame_names[out_frame_idx])))
-#     for out_obj_id, out_mask in video_segments[out_frame_idx].items():
-#         show_mask(out_mask, plt.gca(), obj_id=out_obj_id)
+   
+
+    # use tab as separator and strip the newline character
+    box_base = [int(x) for x in lines[0].strip().split('\t')]
+    #  The bounding box is represented by the centre location and its height and width. 
+    # Convert box to a NumPy array of type np.float32
+    box_base = np.array(box_base, dtype=np.float32)
+
+
+    # box should be in fomrat [x0, y0, x1, y1] - origin is top left corner
+    # (x_min, y_min, x_max, y_max) 
+
+    x_min, y_min, width, height = box_base
+    x_max = x_min + width
+    y_max = y_min + height
+    box = np.array([x_min, y_min, x_max, y_max], dtype=np.float32)
+
+
+
+
+    # # take a look the first video frame
+    # frame_idx = 0
+    # plt.figure(figsize=(9, 6))
+    # plt.title(f"frame {frame_idx}")
+    # plt.imshow(Image.open(os.path.join(video_dir, frame_names[frame_idx])))
+    # plt.show()
+
+    inference_state = predictor.init_state(video_path=video_dir)
+
+    # below line is only needed when previous tracking is done and we want to reset the state
+    predictor.reset_state(inference_state)
+
+
+    ann_frame_idx = 0  # the frame index we interact with
+    ann_obj_id = 1  # give a unique id to each object we interact with (it can be any integers)
+
+    frame_idx , out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
+        inference_state=inference_state,
+        frame_idx=ann_frame_idx,
+        obj_id=ann_obj_id,
+        # points=points,
+        # labels=labels,
+        box = box,
+    )
+
+
+    # print(frame_idx , out_obj_ids, out_mask_logits)
+
+    # # show the results on the current (interacted) frame
+    # plt.figure(figsize=(9, 6))
+    # plt.title(f"frame {ann_frame_idx}")
+    # plt.imshow(Image.open(os.path.join(video_dir, frame_names[ann_frame_idx])))
+    # # show_points(points, labels, plt.gca())
+    # show_box(box, plt.gca())
+    # show_mask((out_mask_logits[0] > 0.0).cpu().numpy(), plt.gca(), obj_id=out_obj_ids[0])
+    # plt.show()
+
+
+    # below allows us to generate the box around the object
+    # Convert out_mask_logits to a binary mask
+    binary_mask = (out_mask_logits[0] > 0.0).cpu().numpy()
+    # Squeeze the binary_mask to remove the extra dimension
+    binary_mask = np.squeeze(binary_mask)
+
+    # Find the coordinates of the non-zero elements in the mask
+    non_zero_coords = np.argwhere(binary_mask)
+
+    # Calculate the bounding box coordinates
+    y_min = np.min(non_zero_coords[:, 0])
+    x_min = np.min(non_zero_coords[:, 1])
+    y_max = np.max(non_zero_coords[:, 0])
+    x_max = np.max(non_zero_coords[:, 1])
+
+    # Create the bounding box
+    new_box = np.array([x_min, y_min, x_max, y_max], dtype=np.float32)
+
+    # print("reference box", box, "output box", new_box)
+
+    # plt.imshow(binary_mask)
+    # plt.show()
+    # sys.exit(0)
+
+    # run propagation throughout the video and collect the results in a dict
+    video_segments = {}  # video_segments contains the per-frame segmentation results
+    output_track_boxes = []  # output_track_boxes contains the per-frame tracking results
+    for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state):
+        video_segments[out_frame_idx] = {
+            out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
+            for i, out_obj_id in enumerate(out_obj_ids)
+        }
+        try: 
+            result_mask = np.squeeze((out_mask_logits[0] > 0.0).cpu().numpy()) # squeeze to remove the extra dimension since only doing 1 object
+            non_zero_coords = np.argwhere(result_mask)
+            y_min = np.min(non_zero_coords[:, 0])
+            x_min = np.min(non_zero_coords[:, 1])
+            y_max = np.max(non_zero_coords[:, 0])
+            x_max = np.max(non_zero_coords[:, 1])
+            result_box = np.array([x_min, y_min, x_max, y_max], dtype=np.float32)
+            output_track_boxes.append(result_box)
+        except:
+            # no object detected, append the previous result if available
+            if output_track_boxes:
+                output_track_boxes.append(output_track_boxes[-1])
+            else:
+                output_track_boxes.append([0, 0, 0, 0])
         
-#     plt.show()
-    
 
-
-
-    
-    
-# save results to result_output_name file
-print(f"Saving results to {result_output_name}")
-with open(result_output_name, 'w') as f:
-    for box in output_track_boxes:
-        x_min, y_min, x_max, y_max = box
-        f.write(f"{int(x_min)}\t{int(y_min)}\t{int(x_max-x_min)}\t{int(y_max-y_min)}\n")
+    # # render the segmentation results every few frames
+    # vis_frame_stride = 30
+    # plt.close("all")
+    # for out_frame_idx in range(0, len(frame_names), vis_frame_stride):
+    #     plt.figure(figsize=(6, 4))
+    #     plt.title(f"frame {out_frame_idx}")
+    #     plt.imshow(Image.open(os.path.join(video_dir, frame_names[out_frame_idx])))
+    #     for out_obj_id, out_mask in video_segments[out_frame_idx].items():
+    #         show_mask(out_mask, plt.gca(), obj_id=out_obj_id)
+            
+    #     plt.show()
         
+
+
+
+        
+        
+    # save results to result_output_name file
+    print(f"Saving results to {result_output_name}")
+    with open(result_output_name, 'w') as f:
+        for box in output_track_boxes:
+            x_min, y_min, x_max, y_max = box
+            f.write(f"{int(x_min)}\t{int(y_min)}\t{int(x_max-x_min)}\t{int(y_max-y_min)}\n")
+            
 print("Done!")

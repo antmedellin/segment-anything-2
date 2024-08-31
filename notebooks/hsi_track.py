@@ -34,11 +34,17 @@ def show_box(box, ax):
 
 # choose model to use
 
-# sam2_checkpoint = "checkpoints/sam2_hiera_large.pt"
-# model_cfg = "sam2_hiera_l.yaml"
+# can overload 24 gb vram, which causes it to be slow 
+sam2_checkpoint = "checkpoints/sam2_hiera_large.pt"
+model_cfg = "sam2_hiera_l.yaml"
 
-sam2_checkpoint = "checkpoints/sam2_hiera_tiny.pt"
-model_cfg = "sam2_hiera_t.yaml"
+sam2_checkpoint = "checkpoints/sam2_hiera_base_plus.pt"
+model_cfg = "sam2_hiera_b+.yaml"
+
+
+
+# sam2_checkpoint = "checkpoints/sam2_hiera_tiny.pt"
+# model_cfg = "sam2_hiera_t.yaml"
 
 
 # choose video to track
@@ -48,12 +54,38 @@ model_cfg = "sam2_hiera_t.yaml"
 # video_dir = "../hsi_tracking/datasets/training/HSI-VIS-FalseColor/automobile/automobile"
 # video_dir = "../hsi_tracking/datasets/training/HSI-VIS-FalseColor/ball/ball"
 
-results_output_dir = "notebooks/results/training/HSI-VIS-FalseColor"
+# results_output_dir = "notebooks/results/training/HSI-VIS-FalseColor"
+# results_output_dir = "notebooks/results/training/HSI-NIR-FalseColor"
+# results_output_dir = "notebooks/results/training/HSI-RedNIR-FalseColor"
 
 # reference https://www.hsitracking.com/contest/ 
 
 #print out all the directories in the datasets/training/HSI-VIS-FalseColor directory
-video_base_dir = "../hsi_tracking/datasets/training/HSI-VIS-FalseColor"
+# video_base_dir = "../hsi_tracking/datasets/training/HSI-VIS-FalseColor"
+# video_base_dir = "../hsi_tracking/datasets/training/HSI-NIR-FalseColor"
+# video_base_dir = "../hsi_tracking/datasets/training/HSI-RedNIR-FalseColor"
+
+
+# results_output_dir = "notebooks/results/training/HSI-NIR-FalseColor"
+# video_base_dir = "../hsi_tracking/datasets/training/HSI-NIR-FalseColor"
+
+# results_output_dir = "notebooks/results/training/HSI-VIS-FalseColor"
+# video_base_dir = "../hsi_tracking/datasets/training/HSI-VIS-FalseColor"
+
+# results_output_dir = "notebooks/results/training/HSI-RedNIR-FalseColor"
+# video_base_dir = "../hsi_tracking/datasets/training/HSI-RedNIR-FalseColor"
+
+
+# results_output_dir = "notebooks/results/validation/HSI-NIR-FalseColor"
+# video_base_dir = "../hsi_tracking/datasets/validation/HSI-NIR-FalseColor"
+
+results_output_dir = "notebooks/results/validation/HSI-VIS-FalseColor"
+video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor"
+
+# results_output_dir = "notebooks/results/validation/HSI-RedNIR-FalseColor"
+# video_base_dir = "../hsi_tracking/datasets/validation/HSI-RedNIR-FalseColor"
+
+
 video_sub_dirs = os.listdir(video_base_dir)
 
 # print(video_sub_dirs)
@@ -96,6 +128,7 @@ for current_video_sub_dir in video_sub_dirs:
     
     
     
+    
     # Get the base name of the results_output_dir
     base_name = os.path.basename(current_video_sub_dir)
     print(f"Processing {base_name}, directory number {video_sub_dirs.index(current_video_sub_dir)+1} of {len(video_sub_dirs)}")
@@ -113,25 +146,53 @@ for current_video_sub_dir in video_sub_dirs:
         print(f"Skipping {current_video_sub_dir} as it is not a directory.")
         continue
     
-    # # scan all the JPEG frame names in this directory and sort them by frame index
-    frame_names = [
-        p for p in os.listdir(video_dir)
-        if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG"]
-    ]
-    # print(f"Number of frames in video: {len(frame_names)}")#, first frame: {frame_names[0]}")
+    # # # scan all the JPEG frame names in this directory and sort them by frame index
+    # frame_names = [
+    #     p for p in os.listdir(video_dir)
+    #     if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG"]
+    # ]
+    # # print(f"Number of frames in video: {len(frame_names)}")#, first frame: {frame_names[0]}")
     
-    if len(frame_names) == 0:
-        video_dir = os.path.join(video_base_dir, current_video_sub_dir,current_video_sub_dir)
-        # print(video_dir)
+    # if len(frame_names) == 0:
+    #     video_dir = os.path.join(video_base_dir, current_video_sub_dir,current_video_sub_dir)
+    #     # print(video_dir)
+    #     frame_names = [
+    #         p for p in os.listdir(video_dir)
+    #         if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG"]
+    #     ]
+    #     # print(f"Number of new frames in video: {len(frame_names)}")#, first frame: {frame_names[0]}")
+    
+    # Scan all the JPEG frame names in this directory and sort them by frame index
+    try:
         frame_names = [
             p for p in os.listdir(video_dir)
             if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG"]
         ]
-        # print(f"Number of new frames in video: {len(frame_names)}")#, first frame: {frame_names[0]}")
+    except FileNotFoundError:
+        print(f"Directory {video_dir} not found.")
+        continue
     
+    if len(frame_names) == 0:
+        video_dir = os.path.join(video_base_dir, current_video_sub_dir, current_video_sub_dir)
+        try:
+            frame_names = [
+                p for p in os.listdir(video_dir)
+                if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG"]
+            ]
+        except FileNotFoundError:
+            print(f"Directory {video_dir} not found.")
+            continue
+        
+        
     if len(frame_names) == 0:
         print(f"No frames found in {current_video_sub_dir}")
         continue
+    # elif len(frame_names) > 800:
+    #     # can cause memory issues on some gpus
+    #     print(f"Skipping {current_video_sub_dir} as it has more than 800 frames.")
+    #     continue
+    
+        # if longer than 800 frames, logic needs to be added to split it into smaller segments and process them separately
     
     frame_names.sort(key=lambda p: int(os.path.splitext(p)[0]))
 
@@ -152,7 +213,8 @@ for current_video_sub_dir in video_sub_dirs:
    
 
     # use tab as separator and strip the newline character
-    box_base = [int(x) for x in lines[0].strip().split('\t')]
+    # box_base = [int(x) for x in lines[0].strip().split('\t')]
+    box_base = [int(x) for x in lines[0].strip().split()]
     #  The bounding box is represented by the centre location and its height and width. 
     # Convert box to a NumPy array of type np.float32
     box_base = np.array(box_base, dtype=np.float32)
@@ -176,7 +238,10 @@ for current_video_sub_dir in video_sub_dirs:
     # plt.imshow(Image.open(os.path.join(video_dir, frame_names[frame_idx])))
     # plt.show()
 
-    inference_state = predictor.init_state(video_path=video_dir)
+    # Clear GPU memory
+    torch.cuda.empty_cache()
+    
+    inference_state = predictor.init_state(video_path=video_dir, offload_video_to_cpu=False,  offload_state_to_cpu=False,  async_loading_frames=False,)
 
     # below line is only needed when previous tracking is done and we want to reset the state
     predictor.reset_state(inference_state)

@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-
+import os 
+import sys
 # reference  https://www.hsitracking.com/contest/
 
 
@@ -136,15 +137,94 @@ def compile_results(gt, bboxes):
 
 
 
-# Read the contents of the text files
-predicted = np.loadtxt('notebooks/results/automobile.txt')
-ground_truth = np.loadtxt('/workspaces/hsi_tracking/datasets/training/HSI-VIS-FalseColor/automobile/automobile/groundtruth_rect.txt')
+# # Read the contents of the text files
+# predicted = np.loadtxt('notebooks/results/toy2.txt')
+# ground_truth = np.loadtxt('/workspaces/hsi_tracking/datasets/training/HSI-VIS-FalseColor/toy2/toy2/groundtruth_rect.txt')
 
-dp, op, cle, auc, dp_20 = compile_results(ground_truth, predicted)
-print(
-      "average center location error", cle,  
-      "\narea under curve", auc, 
-      "\naverage distance precision rate at 20 pixel threshold", dp_20)
+# dp, op, cle, auc, dp_20 = compile_results(ground_truth, predicted)
+# print(
+#       "average center location error", cle,  
+#       "\narea under curve", auc, 
+#       "\naverage distance precision rate at 20 pixel threshold", dp_20)
 
-# print('precision', dp,
-#       "success", op, )
+# # print('precision', dp,
+# #       "success", op, )
+
+# Directory paths
+# predicted_dir = 'notebooks/results/training/HSI-RedNIR-FalseColor'
+# ground_truth_dir = '../hsi_tracking/datasets/training/HSI-RedNIR-FalseColor/'
+
+# predicted_dir = 'notebooks/results/training/HSI-VIS-FalseColor'
+# ground_truth_dir = '../hsi_tracking/datasets/training/HSI-VIS-FalseColor/'
+
+# predicted_dir = 'notebooks/results/training/HSI-NIR-FalseColor'
+# ground_truth_dir = '../hsi_tracking/datasets/training/HSI-NIR-FalseColor/'
+
+# predicted_dir = 'notebooks/results/validation/HSI-NIR-FalseColor'
+# ground_truth_dir = '../hsi_tracking/datasets/validation/HSI-NIR-FalseColor/'
+
+# predicted_dir = 'notebooks/results/validation/HSI-RedNIR-FalseColor'
+# ground_truth_dir = '../hsi_tracking/datasets/validation/HSI-RedNIR-FalseColor/'
+
+predicted_dir = 'notebooks/results/validation/HSI-VIS-FalseColor'
+ground_truth_dir = '../hsi_tracking/datasets/validation/HSI-VIS-FalseColor/'
+
+result_output = 'tracking_metrics_results.csv'
+
+# Initialize a list to store results
+results = []
+
+# Iterate over all files in the predicted directory
+for predicted_file in os.listdir(predicted_dir):
+    if predicted_file.endswith('.txt'):
+        # Construct the full path to the predicted file
+        predicted_path = os.path.join(predicted_dir, predicted_file)
+        
+        # Construct the corresponding ground truth file path
+        base_name = os.path.splitext(predicted_file)[0]
+        
+        ground_truth_path = os.path.join(ground_truth_dir,  base_name, 'groundtruth_rect.txt')
+        if not os.path.exists(ground_truth_path):
+            ground_truth_path = os.path.join(ground_truth_dir,  base_name,base_name, 'groundtruth_rect.txt')
+            # print(ground_truth_path)
+        
+        if not os.path.exists(ground_truth_path):
+            # print the file name that does not have ground truth
+            print(predicted_file, "does not have ground truth")
+            
+        # print(predicted_path, ground_truth_path, os.path.exists(ground_truth_path))
+        
+        # Check if the ground truth file exists
+        if os.path.exists(ground_truth_path):
+            # Read the contents of the text files
+            predicted = np.loadtxt(predicted_path)
+            ground_truth = np.loadtxt(ground_truth_path)
+            
+            # Compute the metrics
+            dp, op, cle, auc, dp_20 = compile_results(ground_truth, predicted)
+            
+            # Append the results to the list
+            results.append({
+                'file': predicted_file,
+                'average_center_location_error': cle,
+                'area_under_curve': auc,
+                'average_distance_precision_rate_at_20_pixel_threshold': dp_20
+            })
+
+# Convert the results to a DataFrame
+results_df = pd.DataFrame(results)
+
+# Save the results to a CSV file
+results_df.to_csv(result_output, index=False)
+
+
+# Calculate the averages
+# Calculate the averages, excluding the 'file' column
+averages = results_df.drop(columns=['file']).mean()
+
+# Print the averages
+print("Averages:")
+print(averages)
+
+
+print("Results saved to tracking_metrics_results.csv")

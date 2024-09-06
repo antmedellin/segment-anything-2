@@ -115,16 +115,16 @@ norm_threshold = 7 # spectral similarity allowed
 # results_output_dir = "notebooks/results/training/HSI-VIS-FalseColor"
 # video_base_dir = "../hsi_tracking/datasets/training/HSI-VIS-FalseColor"
 
-# results_output_dir = "notebooks/results/training/HSI-RedNIR-FalseColor"
-# video_base_dir = "../hsi_tracking/datasets/training/HSI-RedNIR-FalseColor"
-
+results_output_dir = "notebooks/results/training/HSI-RedNIR-FalseColor"
+video_base_dir = "../hsi_tracking/datasets/training/HSI-RedNIR-FalseColor"
+relative_path_to_hsi = "../../../HSI-RedNIR"
 
 # results_output_dir = "notebooks/results/validation/HSI-NIR-FalseColor"
 # video_base_dir = "../hsi_tracking/datasets/validation/HSI-NIR-FalseColor"
 
-results_output_dir = "notebooks/results/validation/HSI-VIS-FalseColor"
-video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor"
-relative_path_to_hsi = "../../../HSI-VIS"
+# results_output_dir = "notebooks/results/validation/HSI-VIS-FalseColor"
+# video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor"
+# relative_path_to_hsi = "../../../HSI-VIS"
 
 # results_output_dir = "notebooks/results/validation/HSI-RedNIR-FalseColor"
 # video_base_dir = "../hsi_tracking/datasets/validation/HSI-RedNIR-FalseColor"
@@ -441,7 +441,7 @@ for current_video_sub_dir in video_sub_dirs:
                     if current_reprompts == max_reprompts:
                         continue
                     
-                    
+                continue    
                 # this is when we need to reinitialize the object by adding a new point or box
                 
                 # take the median spectral signature of the object from the first frame and the previous frame

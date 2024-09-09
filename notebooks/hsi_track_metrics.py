@@ -5,7 +5,6 @@ import os
 import sys
 # reference  https://www.hsitracking.com/contest/
 
-
 def X2Cube(img,B=[4, 4],skip = [4, 4],bandNumber=16):
     # Parameters
     M, N = img.shape

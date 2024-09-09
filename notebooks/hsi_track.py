@@ -6,6 +6,7 @@ from PIL import Image
 from sam2.build_sam import build_sam2_video_predictor
 import sys
 import matplotlib.patches as patches
+import math
 
 def X2Cube(img,B=[4, 4],skip = [4, 4],bandNumber=16):
     # Parameters
@@ -72,6 +73,43 @@ def get_median_rgb(image, mask):
     
     return median_rgb
 
+
+def spectral_angle_mapper(cur_pixel, ref_spec):
+        dot_product = np.dot( cur_pixel, ref_spec)
+        norm_spectral=np.linalg.norm(cur_pixel)
+        norm_ref=np.linalg.norm(ref_spec)
+        denom = norm_spectral * norm_ref
+        if denom == 0:
+            return 3.14
+        alpha_rad=math.acos(dot_product / (denom)); 
+        return alpha_rad*255/3.1416 
+    
+def spectral_similarity_analysis(test_spectrums, ref_spectrum):
+    
+    # Calculate the spectral angle between the test spectrum and the reference spectrum
+    #replace with the algorithm that is desired to be used 
+    print(test_spectrums.shape, ref_spectrum.shape)
+    
+    # make sure the size of the arrays are compatible
+    assert test_spectrums.shape[1] == ref_spectrum.shape[0]
+    
+    spectral_angles = []
+    
+    for i in range(test_spectrums.shape[0]):
+        test_spectrum = test_spectrums[i]
+        
+        #perform spectral similarity analysis here
+        result = spectral_angle_mapper(test_spectrum, ref_spectrum)
+        
+        spectral_angles.append(result)
+
+
+    # print(spectral_angles)
+    spectral_angles = np.array(spectral_angles)
+    # return 1d array of spectral angles
+    return spectral_angles
+
+
 # choose model to use
 
 # can overload 24 gb vram, which causes it to be slow 
@@ -87,7 +125,7 @@ sam2_checkpoint = "checkpoints/sam2_hiera_tiny.pt"
 model_cfg = "sam2_hiera_t.yaml"
 
 # Define the threshold to exapand box by
-threshold = 0 # expand box by this threshold
+threshold = 5 # expand box by this threshold for each frame since previous success
 norm_threshold = 7 # spectral similarity allowed 
 
 # choose video to track
@@ -111,16 +149,19 @@ norm_threshold = 7 # spectral similarity allowed
 
 # results_output_dir = "notebooks/results/training/HSI-NIR-FalseColor"
 # video_base_dir = "../hsi_tracking/datasets/training/HSI-NIR-FalseColor"
+# relative_path_to_hsi = "../../../HSI-NIR"
 
 # results_output_dir = "notebooks/results/training/HSI-VIS-FalseColor"
 # video_base_dir = "../hsi_tracking/datasets/training/HSI-VIS-FalseColor"
+# relative_path_to_hsi = "../../../HSI-VIS"
 
-results_output_dir = "notebooks/results/training/HSI-RedNIR-FalseColor"
-video_base_dir = "../hsi_tracking/datasets/training/HSI-RedNIR-FalseColor"
-relative_path_to_hsi = "../../../HSI-RedNIR"
+# results_output_dir = "notebooks/results/training/HSI-RedNIR-FalseColor"
+# video_base_dir = "../hsi_tracking/datasets/training/HSI-RedNIR-FalseColor"
+# relative_path_to_hsi = "../../../HSI-RedNIR"
 
 # results_output_dir = "notebooks/results/validation/HSI-NIR-FalseColor"
 # video_base_dir = "../hsi_tracking/datasets/validation/HSI-NIR-FalseColor"
+# relative_path_to_hsi = "../../../HSI-NIR"
 
 # results_output_dir = "notebooks/results/validation/HSI-VIS-FalseColor"
 # video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor"
@@ -128,11 +169,12 @@ relative_path_to_hsi = "../../../HSI-RedNIR"
 
 # results_output_dir = "notebooks/results/validation/HSI-RedNIR-FalseColor"
 # video_base_dir = "../hsi_tracking/datasets/validation/HSI-RedNIR-FalseColor"
+# relative_path_to_hsi = "../../../HSI-RedNIR"
 
 
-# results_output_dir = "notebooks/results/development"
-# video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor/S_runner1"
-# relative_path_to_hsi = "../../../HSI-VIS"
+results_output_dir = "notebooks/results/development"
+video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor/S_runner1"
+relative_path_to_hsi = "../../../HSI-VIS"
 
 
 video_sub_dirs = os.listdir(video_base_dir)
@@ -172,6 +214,9 @@ if not os.path.exists(results_output_dir):
     
 # initialize the predictor     
 predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device)
+
+# Initialize an empty set to store directories where no objects are detected
+no_objects_detected_dirs = set()
     
 for current_video_sub_dir in video_sub_dirs:    
     
@@ -432,6 +477,10 @@ for current_video_sub_dir in video_sub_dirs:
                 # print(f"No object detected in frame {out_frame_idx}")
                 
                 
+                # Add the current video sub-directory to the set
+                no_objects_detected_dirs.add(current_video_sub_dir)
+                
+                
                 if out_frame_idx <= reprompt_frame_idx:
                     all_points_annotated = False
                     continue
@@ -441,7 +490,6 @@ for current_video_sub_dir in video_sub_dirs:
                     if current_reprompts == max_reprompts:
                         continue
                     
-                continue    
                 # this is when we need to reinitialize the object by adding a new point or box
                 
                 # take the median spectral signature of the object from the first frame and the previous frame
@@ -504,10 +552,11 @@ for current_video_sub_dir in video_sub_dirs:
                 # Check if the closest pixels are within the previous object box plus a threshold
                 prev_box = output_track_boxes[-1]
                 x_min, y_min, x_max, y_max = prev_box
-                x_min -= threshold
-                y_min -= threshold
-                x_max += threshold
-                y_max += threshold
+                # multiply threshold be number of frames since last success
+                x_min -= threshold * (out_frame_idx - previous_success_index)
+                y_min -= threshold * (out_frame_idx - previous_success_index)
+                x_max += threshold * (out_frame_idx - previous_success_index)
+                y_max += threshold * (out_frame_idx - previous_success_index)
                 
                 # make sure the box is within the image size
                 x_min = int(max(x_min, 0))
@@ -519,6 +568,8 @@ for current_video_sub_dir in video_sub_dirs:
                 # Extract the ROI from the current image
                 # roi = current_image_np[y_min:y_max, x_min:x_max]
                 roi_hsi = hsi_current_image[y_min:y_max, x_min:x_max]
+                
+                print("ROI shape initial:", roi_hsi.shape)
 
                 # Flatten the ROI for distance calculation
                 # roi_flatten = roi.reshape(-1, 3)
@@ -531,7 +582,22 @@ for current_video_sub_dir in video_sub_dirs:
                 # calculate the distance between the median rgb values and the pixels in the current image
                 # distance_original = np.linalg.norm(current_image_flatten - median_rgb_original, axis=1)
                 # distance_original = np.linalg.norm(roi_flatten - median_rgb_original, axis=1)
-                distance_original = np.linalg.norm(roi_hsi_flatten - median_hsi_original, axis=1)
+                # distance_original = np.linalg.norm(roi_hsi_flatten - median_hsi_original, axis=1)
+
+                #use spectral similarity instead of euclidean distance
+                
+                # create a new function to take in mxc and 1xc and return mx1 which has the lowest dissimilarity
+                
+                # print(distance_original) 
+                # print(len(distance_original), len(roi_hsi_flatten))
+                
+                distance_original = spectral_similarity_analysis(roi_hsi_flatten, median_hsi_original)
+
+                # print("spectral analysis result", np.argmin(tmp_result),np.min(tmp_result),"lin alg norm result", np.argmin(distance_original),  np.min(distance_original))
+                # print(tmp_result.shape, distance_original.shape)
+                
+                
+                # sys.exit()
                 # find the index of the pixel with the smallest distance
                 # closest_pixel_idx_original = np.argmin(distance_original)
                 closest_pixel_idx_original = np.argmin(distance_original)
@@ -541,7 +607,13 @@ for current_video_sub_dir in video_sub_dirs:
                 # closest_pixel_coords_orig = np.unravel_index(closest_pixel_idx_original, roi.shape[:2])
                 # closest_pixel_coords_orig = (closest_pixel_coords_orig[0] + y_min, closest_pixel_coords_orig[1] + x_min)
                 
+                
+                # not sure if the unravel is correct right now
                 closest_pixel_coords_orig = np.unravel_index(closest_pixel_idx_original, roi_hsi.shape[:2])
+                
+                print("roi unravel shape", closest_pixel_coords_orig)
+                # sys.exit()
+                
                 closest_pixel_coords_orig = (closest_pixel_coords_orig[0] + y_min, closest_pixel_coords_orig[1] + x_min)
 
                 print("Closest pixel coordinates in the original image within the bounding box:", closest_pixel_coords_orig, "difference amount", np.min(distance_original), "rgb pixel values current", current_image_np[closest_pixel_coords_orig[0], closest_pixel_coords_orig[1]], "mediam rgb original img", median_rgb_original)
@@ -550,12 +622,15 @@ for current_video_sub_dir in video_sub_dirs:
                 # find the pixels in the previous image that are closest to the median rgb values
                 # distance_previous = np.linalg.norm(current_image_flatten - median_rgb_previous, axis=1)
                 # distance_previous = np.linalg.norm(roi_flatten - median_rgb_previous, axis=1)
-                distance_previous = np.linalg.norm(roi_hsi_flatten - median_hsi_previous, axis=1)
-                closest_pixel_idx_previous = np.argmin(distance_previous)
+                # distance_previous = np.linalg.norm(roi_hsi_flatten - median_hsi_previous, axis=1)
                 # closest_pixel_coords_previous = np.unravel_index(closest_pixel_idx_previous, current_image_np.shape[:2])
                 # print("Closest pixel coordinates in the previous image:", closest_pixel_coords_previous,  np.min(distance_original), "rgb pixel values current", current_image_np[closest_pixel_coords_previous[0], closest_pixel_coords_previous[1]], "mediam rgb previous img", median_rgb_previous)
+                distance_previous = spectral_similarity_analysis(roi_hsi_flatten, median_hsi_previous)
                 
-                closest_pixel_coords_previous = np.unravel_index(closest_pixel_idx_previous, roi_hsi_flatten.shape[:2])
+                closest_pixel_idx_previous = np.argmin(distance_previous)
+
+                
+                closest_pixel_coords_previous = np.unravel_index(closest_pixel_idx_previous, roi_hsi.shape[:2])
                 closest_pixel_coords_previous = (closest_pixel_coords_previous[0] + y_min, closest_pixel_coords_previous[1] + x_min)
 
                 print("Closest pixel coordinates in the previous image within the bounding box:", closest_pixel_coords_previous, "difference amount", np.min(distance_previous), "rgb pixel values current", current_image_np[closest_pixel_coords_previous[0], closest_pixel_coords_previous[1]], "mediam rgb previous img", median_rgb_previous)
@@ -597,7 +672,7 @@ for current_video_sub_dir in video_sub_dirs:
                 # sys.exit()
                 
                 # plot original image, previous image, current image
-                fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+                fig, ax = plt.subplots(1, 4, figsize=(20, 5))
                 ax[0].imshow(original_image)
                 show_mask(binary_mask, ax[0], obj_id=ann_obj_id)  # Use show_mask function
                 ax[0].set_title("Original Image")
@@ -616,9 +691,23 @@ for current_video_sub_dir in video_sub_dirs:
                 ax[2].scatter(best_match_coords[1], best_match_coords[0], color='red', marker='x', s=100)  # Add marker for best match
                 ax[2].set_title("Current Image")
                 
+                # Add a rectangle for the ROI on the current frame
+                roi_rect = patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, linewidth=2, edgecolor='b', facecolor='none')
+                ax[2].add_patch(roi_rect)
                 
+                # Plot the median HSI values
+                ax[3].plot(median_hsi_original, label='Median HSI Original')
+                ax[3].plot(median_hsi_previous, label='Median HSI Previous')
+                # Extract the pixel values at the best match coordinates from the current image
+                best_match_pixel_values = hsi_current_image[best_match_coords[0], best_match_coords[1]]
+                ax[3].plot(best_match_pixel_values, label='Best Match Pixel Values', linestyle='--')
+
+
+
+                ax[3].set_title("Median HSI Values")
+                ax[3].legend()
                 
-                # plt.show()
+                plt.show()
                 previous_mask = result_mask*0
                 all_points_annotated = False
                 current_reprompts+=1
@@ -657,3 +746,6 @@ for current_video_sub_dir in video_sub_dirs:
                     f.write(f"{int(x_min)}\t{int(y_min)}\t{int(x_max-x_min)}\t{int(y_max-y_min)}\n")
             
 print("Done!")
+print(video_base_dir)
+print("Number of directories with tracks lost:", len(no_objects_detected_dirs))
+print("Directories with tracks lost:", no_objects_detected_dirs)

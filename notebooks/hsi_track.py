@@ -12,7 +12,8 @@ import math
 from sklearn.cluster import SpectralClustering, DBSCAN
 from matplotlib.colors import ListedColormap
 from skimage.transform import resize
-
+from transformers import pipeline
+# pip install -q -U transformers
 
 def X2Cube(img,B=[4, 4],skip = [4, 4],bandNumber=16):
     # Parameters
@@ -298,6 +299,30 @@ def get_center_of_mask(mask):
     indices = np.argwhere(mask)
     center = np.mean(indices, axis=0)
     return center
+
+# select the device for computation
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
+print(f"using device: {device}")
+
+if device.type == "cuda":
+    # use bfloat16 for the entire notebook
+    torch.autocast("cuda", dtype=torch.bfloat16).__enter__()
+    # turn on tfloat32 for Ampere GPUs (https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices)
+    if torch.cuda.get_device_properties(0).major >= 8:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+elif device.type == "mps":
+    print(
+        "\nSupport for MPS devices is preliminary. SAM 2 is trained with CUDA and might "
+        "give numerically different outputs and sometimes degraded performance on MPS. "
+        "See e.g. https://github.com/pytorch/pytorch/issues/84936 for a discussion."
+    )
+
 # choose model to use
 
 # can overload 24 gb vram, which causes it to be slow 
@@ -313,17 +338,21 @@ sam2_checkpoint = "checkpoints/sam2_hiera_tiny.pt"
 model_cfg = "sam2_hiera_t.yaml"
 
 # Define the threshold to exapand box by
-threshold = 5 # expand box by this threshold for each frame since previous success
+threshold = 5 # allowable change in box coordinates to prevent large changes in results, expand box by this threshold for each frame since previous success
 norm_threshold = 15 # spectral similarity allowed 
 min_obj_area = 50 
 
 
-
+# kalman filter 
 dt = 1.0  # Time step
 state_dim = 4  # [x, y, vx, vy]
 measurement_dim = 2  # [x, y]
 
 
+# depth estimation
+checkpoint = "depth-anything/Depth-Anything-V2-base-hf"
+with torch.autocast("cuda", dtype=torch.float16):
+    pipe = pipeline("depth-estimation", model=checkpoint, device=device)
 
 # choose video to track
 
@@ -356,24 +385,24 @@ measurement_dim = 2  # [x, y]
 # video_base_dir = "../hsi_tracking/datasets/training/HSI-RedNIR-FalseColor"
 # relative_path_to_hsi = "../../HSI-RedNIR"
 
-results_output_dir = "notebooks/results/validation/HSI-NIR-FalseColor"
-video_base_dir = "../hsi_tracking/datasets/validation/HSI-NIR-FalseColor"
-relative_path_to_hsi = "../../../HSI-NIR"
+# results_output_dir = "notebooks/results/validation/HSI-NIR-FalseColor"
+# video_base_dir = "../hsi_tracking/datasets/validation/HSI-NIR-FalseColor"
+# relative_path_to_hsi = "../../../HSI-NIR"
 
 # results_output_dir = "notebooks/results/validation/HSI-VIS-FalseColor"
 # video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor"
 # relative_path_to_hsi = "../../../HSI-VIS"
 
-# results_output_dir = "notebooks/results/validation/HSI-RedNIR-FalseColor"
-# video_base_dir = "../hsi_tracking/datasets/validation/HSI-RedNIR-FalseColor"
-# relative_path_to_hsi = "../../HSI-RedNIR"
+results_output_dir = "notebooks/results/validation/HSI-RedNIR-FalseColor"
+video_base_dir = "../hsi_tracking/datasets/validation/HSI-RedNIR-FalseColor"
+relative_path_to_hsi = "../../HSI-RedNIR"
 
 
 # results_output_dir = "notebooks/results/development"
 # # video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor/S_runner1"
-# # video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor/oranges5"
-# # video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor/droneshow2"
-# video_base_dir = "../hsi_tracking/datasets/training/HSI-VIS-FalseColor/car6"
+# video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor/oranges5"
+# # # video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor/droneshow2"
+# # video_base_dir = "../hsi_tracking/datasets/training/HSI-VIS-FalseColor/car6"
 # relative_path_to_hsi = "../../../HSI-VIS"
 
 
@@ -387,28 +416,7 @@ video_sub_dirs = os.listdir(video_base_dir)
 
 
 # start of code 
-# select the device for computation
-if torch.cuda.is_available():
-    device = torch.device("cuda")
-elif torch.backends.mps.is_available():
-    device = torch.device("mps")
-else:
-    device = torch.device("cpu")
-print(f"using device: {device}")
 
-if device.type == "cuda":
-    # use bfloat16 for the entire notebook
-    torch.autocast("cuda", dtype=torch.bfloat16).__enter__()
-    # turn on tfloat32 for Ampere GPUs (https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices)
-    if torch.cuda.get_device_properties(0).major >= 8:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-elif device.type == "mps":
-    print(
-        "\nSupport for MPS devices is preliminary. SAM 2 is trained with CUDA and might "
-        "give numerically different outputs and sometimes degraded performance on MPS. "
-        "See e.g. https://github.com/pytorch/pytorch/issues/84936 for a discussion."
-    )
 # Ensure results_output_dir exists
 if not os.path.exists(results_output_dir):
     os.makedirs(results_output_dir)   
@@ -664,17 +672,38 @@ for current_video_sub_dir in video_sub_dirs:
     current_reprompts = 0 
     reprompt_frame_idx = 0
     previous_success_index = 0
+    allowable_area_change = 0.15 # 5% change in area allowed
     while all_points_annotated is False:
         
+        # keep track of the object width and height in the unoccluded frames
+        object_ekf = ExtendedKalmanFilter(dt, state_dim, measurement_dim)
+        object_ekf.Q = np.diag([1,1, 0.5, 0.5])
+        object_ekf.R = np.diag([3,3])
+        
+        # get the width and height of the object using the bounding box 
+        initial_width = box[2] - box[0]
+        initial_height = box[3] - box[1]
+        object_ekf.x[0] = initial_width
+        object_ekf.x[1] = initial_height
+        object_ekf.update(np.array([initial_width, initial_height]))
+        # x[2] is the velocity in the width direction and x[3] is the velocity in the height direction
+        # print(f"Initial width: {initial_width}, Initial height: {initial_height}")
+        prev_depth = 0
+        
+        # keep track of center of modal mask, not center of object 
         ekf = ExtendedKalmanFilter(dt, state_dim, measurement_dim)
         # Process noise covariance
-        ekf.Q = np.diag([0.5, 0.5, 0.1, 0.1])
+        ekf.Q = np.diag([1,1, 0.5, 0.5])
         # Measurement noise covariance
-        ekf.R = np.diag([20,20])
+        ekf.R = np.diag([3,3])
         # Initial state [x, y, vx, vy]
         initial_center = get_center_of_mask(binary_mask)
         ekf.x[:2] = initial_center.reshape(-1, 1)
         
+        # Initialize the plot
+        # fig_occ, ax_occ = plt.subplots(1, 4, figsize=(10, 5))
+
+
         video_segments = {}  # video_segments contains the per-frame segmentation results
         output_track_boxes = []  # output_track_boxes contains the per-frame tracking results
         for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state):
@@ -692,14 +721,385 @@ for current_video_sub_dir in video_sub_dirs:
                     y_max = np.max(non_zero_coords[:, 0])
                     x_max = np.max(non_zero_coords[:, 1])
                     result_box = np.array([x_min, y_min, x_max, y_max], dtype=np.float32)
+                    
+                    
+                    current_image = Image.open(os.path.join(video_dir, frame_names[out_frame_idx]))
+                    current_image_np = np.array(current_image)
+                    with torch.autocast("cuda", dtype=torch.float16):
+                        predictions = pipe(current_image)
+                        depth_prediction = predictions["depth"]
+                    
+                    
+                    
+                    # Check if the closest pixels are within the previous object box plus a threshold
+                    # prev_box = output_track_boxes[-1]
+                    # x_min, y_min, x_max, y_max = prev_box
+                    # multiply threshold be number of frames since last success
+                    x_min -= threshold #* (out_frame_idx - previous_success_index)
+                    y_min -= threshold #* (out_frame_idx - previous_success_index)
+                    x_max += threshold #* (out_frame_idx - previous_success_index)
+                    y_max += threshold #* (out_frame_idx - previous_success_index)
+                    
+                    # make sure the box is within the image size
+                    x_min = int(max(x_min, 0))
+                    y_min = int(max(y_min, 0))
+                    x_max = int(min(x_max, current_image_np.shape[1]))
+                    y_max = int(min(y_max, current_image_np.shape[0]))
+                    
+                    
+                    depth_prediction_np = np.array(depth_prediction)
+                    
+                    # get max value in mask region 
+                    mask_depth_full = depth_prediction_np * (result_mask) 
+                    mask_depth_mask = mask_depth_full[y_min:y_max, x_min:x_max]
+                    max_depth = np.max(mask_depth_mask)
+                    # print(f"Max depth in roi: {max_depth}")
+                    
+                    cur_depth = max_depth
+                    
+                    # compare previous depth to current depth 
+                    
+                    if cur_depth > prev_depth:
+                        # add to kalman filter due to large depth change 
+                        current_width = result_box[2] - result_box[0]
+                        current_height = result_box[3] - result_box[1]
+                        # object_ekf.update(np.array([current_width, current_height]))
+                    
+                    prev_depth = cur_depth
+                    # get max value in roi_depth that is not in the mask
+                    mask_depth_full = depth_prediction_np * (-1+result_mask) * (-1)
+                    mask_depth = mask_depth_full[y_min:y_max, x_min:x_max]
+                    # mask_depth = mask_depth.flatten()
+                    # mask_depth = mask_depth[mask_depth != 0]
+                    max_mask_depth = np.max(mask_depth)
+                    # print(f"Max depth not in mask: {max_mask_depth}")
+                    
+                    # larger values mean closer to the camera
+                    # so if max_mask_depth is greater than max_depth, then likely that the object is occluded
+                    if max_mask_depth > max_depth:
+                        # print("Object is possibly occluded")
+                        
+                        test_roi = current_image_np[y_min:y_max, x_min:x_max]
+                        test_depth_roi = depth_prediction_np[y_min:y_max, x_min:x_max]
+                        
+                        
+                        object_ekf.predict()
+                        predicted_width = object_ekf.x[0][0]
+                        predicted_height = object_ekf.x[0][1]
+                        
+                        # use the predicted width and height for amodal mask generation 
+                        # find the top, bottom, left, or right side of the object that is closest in size to the predicted width and height and opposite side is occluded 
+                        # from the center of the edge, propogate out the width and height of the object 
+                        # use the predicted width and height to generate the amodal mask
+                        
+                        # if there is a full occlusion, then the object is not visible at all and the previous mask would be used. it would go into the exception case since non_zero_coords.size == 0 
+                        
+                        # if there is a partial occlusion, then the object is partially visible and the amodal mask would be generated
+                        
+                        actual_width = result_box[2] - result_box[0]
+                        actual_height = result_box[3] - result_box[1]
+                        
+                        width_diff = actual_width - predicted_width
+                        height_diff = actual_height - predicted_height
+
+                        # only do this if the difference in width or height is greater than 2 pixels
+                        # also make sure the depth hasnt changed too much
+                        
+                        # occluded only if the width and height are both less than the predicted width and height
+                        
+                        # this may be wrong here
+                        if width_diff < -2 and height_diff < -2:
+                            
+                            if width_diff < height_diff:
+                                # closest_side = 'width'
+                                closest_side = 'height'
+                            else:
+                                # closest_side = 'height'
+                                closest_side = 'width'
+                                
+                            # determine occluded side 
+                            # use the location of the max value not in the mask to determine the occluded side
+                            # take the side opposite the occluded side for propogation of the amodal mask 
+                            
+                            # Determine occluded side
+                            max_mask_depth_coords = np.unravel_index(np.argmax(mask_depth, axis=None), mask_depth.shape)
+                            max_y, max_x = max_mask_depth_coords
+
+                            if closest_side == 'height':
+                                if max_x < (x_max - x_min) / 2:
+                                    occluded_side = 'left'
+                                    # occluded_side = 'bottom'
+                                else:
+                                    occluded_side = 'right'
+                                    # occluded_side = 'top'
+                            else:
+                                if max_y < (y_max - y_min) / 2:
+                                    # occluded_side = 'left'
+                                    occluded_side = 'top'
+                                else:
+                                    # occluded_side = 'right'
+                                    occluded_side = 'bottom'
+                            
+                            
+                            # [x_min, y_min, x_max, y_max]
+                            # if closest_side == 'width':
+                            if True:
+                                if occluded_side == 'top':
+                                    # print("Top side is occluded")
+                                    # take center location of bottom side and propogate out the width and height
+                                    # new_y_min = y_min
+                                    # new_y_max = y_min + predicted_height
+                                    new_y_max = y_max
+                                    new_y_min = y_max - predicted_height
+                                    
+                                    new_x_min = x_min 
+                                    new_x_max = x_max
+                                # else:
+                                elif occluded_side == 'bottom':
+                                    # print("Bottom side is occluded")
+                                    # new_y_max = y_max
+                                    # new_y_min = y_max - predicted_height
+                                    
+                                    # new_x_min = x_min
+                                    # new_x_max = x_max
+                                    
+                                    new_y_min = y_min
+                                    new_y_max = y_min + predicted_height
+                                    new_x_min = x_min
+                                    new_x_max = x_max
+                                # else:
+                                elif occluded_side == 'left':
+                                    # print("Left side is occluded")
+                                    
+                                    new_y_min = y_min
+                                    new_y_max = y_max
+                                    
+                                    new_x_max = x_max
+                                    new_x_min = x_max - predicted_width
+                                    
+                                    # new_x_min = x_min
+                                    # new_x_max = x_min + predicted_width
+                                    
+                                    
+                                # else:
+                                elif occluded_side == 'right':
+                                    # print("Right side is occluded")
+                                    
+                                    new_y_min = y_min
+                                    new_y_max = y_max
+                                    
+                                    new_x_min = x_min
+                                    new_x_max = x_min + predicted_width
+                                    
+                                    # new_x_max = x_max
+                                    # new_x_min = x_max - predicted_width
+                            
+                            
+                            
+                            # make sure the box is within the image size
+                            new_x_min = int(max(new_x_min, 0))
+                            new_y_min = int(max(new_y_min, 0))
+                            new_x_max = int(min(new_x_max, current_image_np.shape[1]))
+                            new_y_max = int(min(new_y_max, current_image_np.shape[0]))
+                            
+                            amodal_box = [new_x_min, new_y_min, new_x_max, new_y_max]
+                            result_box = amodal_box
+                            
+                            viz = False
+                            if viz:
+                                # plot both the roi and the depth roi
+                                # fig, ax = plt.subplots(1, 4, figsize=(10, 5))
+                                fig_occ, ax_occ = plt.subplots(1, 4, figsize=(10, 5))
+                                ax_occ[0].imshow(test_roi)
+                                ax_occ[0].set_title("ROI")
+                                
+                                ax_occ[1].imshow(test_depth_roi)
+                                ax_occ[1].set_title("Depth ROI")
+                                # plot an x for the max value not in the mask
+                                ax_occ[1].scatter(max_x, max_y, color='red', marker='x')
+                                
+                                # plot the original image and the full current image with rectangle around mask region
+                                ax_occ[2].imshow(current_image_np)
+                                # ax_occ[2].set_title("Current Image")
+                                ax_occ[2].set_title(f"Current Image\nOccluded: {occluded_side}, Closest: {closest_side}")
+
+                                rect = patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, linewidth=2, edgecolor='r', facecolor='none')
+                                ax_occ[2].add_patch(rect)
+                                
+                                rect_amodal = patches.Rectangle((new_x_min, new_y_min), new_x_max - new_x_min, new_y_max - new_y_min, linewidth=2, edgecolor='g', facecolor='none')
+                                ax_occ[2].add_patch(rect_amodal)
+                                
+                                show_mask(result_mask, ax_occ[2], obj_id=ann_obj_id)  # Use show_mask function
+                                
+                                original_image = Image.open(os.path.join(video_dir, frame_names[0]))
+                                ax_occ[3].imshow(original_image)
+                                show_mask(binary_mask, ax_occ[3], obj_id=ann_obj_id)  # Use show_mask function
+                                ax_occ[3].set_title("Original Image")
+                                rect = patches.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1], linewidth=2, edgecolor='r', facecolor='none')
+                                ax_occ[3].add_patch(rect)
+                                print(f"Predicted width: {object_ekf.x[0][0]}, height: {object_ekf.x[0][1]}, actual width: {current_width}, actual height: {current_height}")
+                                # print the box coordinates 
+                                print(f"Original box: {box}, Amodal box: {amodal_box}")
+                                # print box width and height 
+                                print(f"amodal width: {result_box[2] - result_box[0]}, height: {result_box[3] - result_box[1]}")
+                                
+                              
+                                # plt.show()
+                                # plt.pause(1)
+                                # plt.close(fig_occ)
+                                
+                        # # if the object is not occluded, then use the actual box
+                        # elif width_diff > 0 and height_diff >0:    
+                        #     current_width = result_box[2] - result_box[0]
+                        #     current_height = result_box[3] - result_box[1]
+                        #     object_ekf.update(np.array([current_width, current_height]))
+                    else:
+                        # print("Object is not occluded")
+                        # kalman filter the height and width of the box 
+                        current_width = result_box[2] - result_box[0]
+                        current_height = result_box[3] - result_box[1]
+                        
+                        # comment out for now but should propogate ekf properly 
+                        # object_ekf.predict()
+                        # print(f"Predicted width: {object_ekf.x[0][0]}, height: {object_ekf.x[0][1]}, actual width: {current_width}, actual height: {current_height}")
+                        # object_ekf.update(np.array([current_width, current_height]))
+                        
+                        
+                    
+                    
+                    # print("reached here")
+                    
+                    
+                    
+                    # compare the area of the box to the previous box
+                    # if there is a large change in area, then likely an outlier and should be modified
+                    # if out_frame_idx > 1:
+                    #     previous_box_points = output_track_boxes[-1]
+                    #     previous_area = (previous_box_points[2] - previous_box_points[0]) * (previous_box_points[3] - previous_box_points[1])
+                    #     current_area = (result_box[2] - result_box[0]) * (result_box[3] - result_box[1])
+                        
+                    #     # calculate the percentage change in area
+                    #     area_change = abs(previous_area - current_area) / previous_area
+                    #     if area_change > allowable_area_change:
+                    #         # print(f"Area change too large: {area_change}")
+                    #         raise Exception("Area change too large")
+                    
+                    
+                    # verify that the box corners did not change by more than the allowable threshold
+                    # if they did then set the box corners to the threshold amount 
+                    # if out_frame_idx > 1:
+                    #     previous_box_points = output_track_boxes[-1]
+                       
+                    #     # look at change in box corners by allowing a threshold amount of change
+                    #     # for i in range(4):
+                    #     #     if abs(previous_box_points[i] - result_box[i]) > threshold:
+                    #     #         print(f"Box corner {i} changed by more than threshold by {abs(previous_box_points[i] - result_box[i])}")
+                    #     #         result_box[i] = previous_box_points[i] + np.sign(result_box[i] - previous_box_points[i]) * threshold
+                                
+                    #     # rather than look at change in corners 
+                    #     # look at the change in height and width in relation to the center of the box # make sure this does not change too much because the object should not change shape too much
+                    #     # allows for better tracking of the dynamic 
+                    #     # try not to let the change exceed more than 10% of the box size
+
+                    #     # # Calculate the center, height, and width of the previous box
+                    #     # prev_center_x = (previous_box_points[0] + previous_box_points[2]) / 2
+                    #     # prev_center_y = (previous_box_points[1] + previous_box_points[3]) / 2
+                    #     # prev_width = previous_box_points[2] - previous_box_points[0]
+                    #     # prev_height = previous_box_points[3] - previous_box_points[1]
+                        
+                    #     # # Calculate the center, height, and width of the current box
+                    #     # curr_center_x = (result_box[0] + result_box[2]) / 2
+                    #     # curr_center_y = (result_box[1] + result_box[3]) / 2
+                    #     # curr_width = result_box[2] - result_box[0]
+                    #     # curr_height = result_box[3] - result_box[1]
+                        
+                    #     # # Calculate the percentage change in width and height
+                    #     # width_change = abs(curr_width - prev_width) / (prev_width+1)
+                    #     # height_change = abs(curr_height - prev_height) / (prev_height+1) # add 1 to prevent division by zero
+                        
+                        
+                    #     # # Define the threshold for maximum allowable change (15% of the previous box size)
+                    #     # percent_change_threshold = 0.15
+                        
+                        
+                    #     # # If the change exceeds 10%, adjust the current box dimensions
+                    #     # if width_change > percent_change_threshold:
+                    #     #     # print(f"Width change too large: {width_change}")
+                    #     #     curr_width = prev_width * (1+percent_change_threshold) if curr_width > prev_width else prev_width * (1-percent_change_threshold)
+                    #     #     # result_box[0] = curr_center_x - curr_width / 2
+                    #     #     # result_box[2] = curr_center_x + curr_width / 2
+                    #     #     # Check and adjust corner points if they exceed the threshold
+                    #     #     for i in [0, 2]:
+                    #     #         if abs(previous_box_points[i] - result_box[i]) > threshold:
+                    #     #             print(f"Box corner {i} changed by more than threshold by {abs(previous_box_points[i] - result_box[i])}")
+                    #     #             option1 = previous_box_points[i] + np.sign(result_box[i] - previous_box_points[i]) * threshold
+                    #     #             option2 = previous_box_points[i] + np.sign(result_box[i] - previous_box_points[i]) * curr_width / 2
+                    #     #             result_box[i] = option1 if abs(option1 - result_box[i]) < abs(option2 - result_box[i]) else option2
+                                    
+                                    
+
+                        
+                    #     # if height_change > percent_change_threshold:
+                    #     #     # print(f"Height change too large: {height_change}")
+                    #     #     curr_height = prev_height * (1+percent_change_threshold) if curr_height > prev_height else prev_height * (1-percent_change_threshold)
+                    #     #     # result_box[1] = curr_center_y - curr_height / 2
+                    #     #     # result_box[3] = curr_center_y + curr_height / 2
+                    #     #     for i in [1, 3]:
+                    #     #         if abs(previous_box_points[i] - result_box[i]) > threshold:
+                    #     #             print(f"Box corner {i} changed by more than threshold by {abs(previous_box_points[i] - result_box[i])}")
+                    #     #             option1 = previous_box_points[i] + np.sign(result_box[i] - previous_box_points[i]) * threshold
+                    #     #             option2 = previous_box_points[i] + np.sign(result_box[i] - previous_box_points[i]) * curr_height / 2
+                    #     #             result_box[i] = option1 if abs(option1 - result_box[i]) < abs(option2 - result_box[i]) else option2
+
+
+                    # # # make sure the box is within the image size
+                    # # current_image = Image.open(os.path.join(video_dir, frame_names[out_frame_idx]))
+                    # # current_image_np = np.array(current_image)
+                    # # result_box[0] = int(max(result_box[0], 0))
+                    # # result_box[1] = int(max(result_box[1], 0))
+                    # # result_box[2] = int(min(result_box[2],  current_image_np.shape[0] - 1))
+                    # # result_box[3] = int(min(result_box[3], current_image_np.shape[1] - 1))
+                    
+                    # # with torch.autocast("cuda", dtype=torch.float16):
+                    # #     predictions = pipe(current_image)
+                    # #     depth_prediction = predictions["depth"]
+                    
+                    
+                    # # depth_threshold = 5 
+                    # # x_min, y_min, x_max, y_max = result_box
+                    # # # multiply threshold be number of frames since last success
+                    # # x_min -= depth_threshold
+                    # # y_min -= depth_threshold 
+                    # # x_max += depth_threshold 
+                    # # y_max += depth_threshold 
+                    
+                    # # # make sure the box is within the image size
+                    # # x_min = int(max(x_min, 0))
+                    # # y_min = int(max(y_min, 0))
+                    # # x_max = int(min(x_max, current_image_np.shape[1]))
+                    # # y_max = int(min(y_max, current_image_np.shape[0]))
+                    
+                    # # roi_rgb = current_image_np[y_min:y_max, x_min:x_max]
+                    
+                    # # #plot the mask and the roi
+                    # # fig, ax = plt.subplots(1, 2, figsize=(20, 5))
+                    # # ax[1].imshow(roi_rgb)
+                    
+                    # # ax[0].imshow(current_image)
+                    # # show_mask(result_mask, ax[0], obj_id=ann_obj_id)
+                    
+                    
+                    # # plt.show()
+                            
+                        
                     output_track_boxes.append(result_box)
                     previous_mask = result_mask
                     all_points_annotated = True
                     previous_success_index = out_frame_idx
                     
-                    # Predicted center of the mask
-                    ekf.predict()
-                    predicted_center = ekf.x[:2].flatten()
+                    # # Predicted center of the mask
+                    # ekf.predict()
+                    # predicted_center = ekf.x[:2].flatten()
 
                     new_center = get_center_of_mask(result_mask)
                     ekf.update(new_center.reshape(-1, 1))
@@ -714,22 +1114,50 @@ for current_video_sub_dir in video_sub_dirs:
                 
             except:
                 
-                if out_frame_idx == len(frame_names) - 1:
-                    all_points_annotated = True
-                    break
+                
                 
                 # no object detected, append the previous result if available
                 if output_track_boxes:
                     output_track_boxes.append(output_track_boxes[-1])
+                    # output_track_boxes.append([0, 0, 0, 0])
+                    
+                    # # use the kalman filter to predict the next center of the mask
+                    # ekf.predict()
+                    # predicted_center = ekf.x[:2].flatten()
+                    # # get difference between predicted center and previous center and shift the box by that amount
+                    # shift = predicted_center - new_center
+                    # result_box[0] += shift[1]
+                    # result_box[1] += shift[0]
+                    # result_box[2] += shift[1]
+                    # result_box[3] += shift[0]
+                    
+                    # current_image = Image.open(os.path.join(video_dir, frame_names[out_frame_idx]))
+                    # current_image_np = np.array(current_image)
+                    # # make sure the box is within the image size
+                    # result_box[0] = int(max(result_box[0], 0))
+                    # result_box[1] = int(max(result_box[1], 0))
+                    # result_box[2] = int(min(result_box[2],  current_image_np.shape[0] - 1))
+                    # result_box[3] = int(min(result_box[3], current_image_np.shape[1] - 1))
+                    
+                    
+                    
+                    # output_track_boxes.append(result_box)
+                            
                 else:
                     output_track_boxes.append([0, 0, 0, 0])
                 # print(f"No object detected in frame {out_frame_idx}")
-                
-                
+            
                 # Add the current video sub-directory to the set
                 no_objects_detected_dirs.add(current_video_sub_dir)
                 
+                if out_frame_idx == len(frame_names) - 1:
+                    all_points_annotated = True
+                    break
                 
+                continue 
+            
+            
+            
                 if out_frame_idx <= reprompt_frame_idx:
                     all_points_annotated = False
                     continue
@@ -741,104 +1169,46 @@ for current_video_sub_dir in video_sub_dirs:
                     
                 all_points_annotated = False
                 current_reprompts+=1
-                    
+
+                
+
                 # print(f"Re-prompting for frame {out_frame_idx} and current reprompt frame {reprompt_frame_idx}")
                     
-                # this is when we need to reinitialize the object by adding a new point or box
-                
-                # take the median spectral signature of the object from the first frame and the previous frame
-                # in the frame where the object is not detected, 
-                # use the closes spectral match pixel to add a new point 
-                # validate the result by setting a threshold for spatial distance (in cases of occlusion)
-                # validate the result by making sure the match is close enough
-                
-                
-                # pass the first image, the previous image, current image, original object box, original object mask, previous object mask, previous object box
-                # get workging on rgb first, then move to hyperspectral
-                
                 
                 # Load images
                 original_image = Image.open(os.path.join(video_dir, frame_names[0]))
                 previous_image = Image.open(os.path.join(video_dir, frame_names[previous_success_index]))
                 current_image = Image.open(os.path.join(video_dir, frame_names[out_frame_idx]))
                 
+                #depth estimation of image 
+                # brighter patches are closer to the camera 
+                # lower values are farther from the camera 
+                with torch.autocast("cuda", dtype=torch.float16):
+                    predictions = pipe(current_image)
+                    depth_prediction = predictions["depth"]
                 
-                #hsi images
-                # will need to modify below to match the hsi images directories 
-                try:
-                    
-                    hsi_original_image = X2Cube(np.array(Image.open(os.path.join(video_dir, relative_path_to_hsi,current_video_sub_dir,frame_names[0].split(".")[0]+".png"))) , bandNumber=num_bands)
-                    hsi_previous_image = X2Cube(np.array(Image.open(os.path.join(video_dir, relative_path_to_hsi,current_video_sub_dir,frame_names[previous_success_index].split(".")[0]+".png"))) , bandNumber=num_bands)
-                    hsi_current_image =  X2Cube(np.array(Image.open(os.path.join(video_dir, relative_path_to_hsi,current_video_sub_dir,frame_names[out_frame_idx].split(".")[0]+".png"))) , bandNumber=num_bands)
-                
-                except:
-                    hsi_original_image = X2Cube(np.array(Image.open(os.path.join(video_dir, relative_path_to_hsi,current_video_sub_dir,current_video_sub_dir,frame_names[0].split(".")[0]+".png"))) , bandNumber=num_bands)
-                    hsi_previous_image = X2Cube(np.array(Image.open(os.path.join(video_dir, relative_path_to_hsi,current_video_sub_dir,current_video_sub_dir,frame_names[previous_success_index].split(".")[0]+".png"))) , bandNumber=num_bands)
-                    hsi_current_image =  X2Cube(np.array(Image.open(os.path.join(video_dir, relative_path_to_hsi,current_video_sub_dir,current_video_sub_dir,frame_names[out_frame_idx].split(".")[0]+".png"))) , bandNumber=num_bands)
+                # need to get the max value of the mask 
+                # need to get the max value of region of interest that is not mask 
+                # if there is a a higher value in the roi, then likely that the object is occluded
+                # will need to perform amodal prediction for the full object 
                 
                 
-                
-                # resize the hsi images to match the rgb images using np.resize
-                hsi_original_image = resize(hsi_original_image, (original_image.size[1], original_image.size[0], num_bands))
-                hsi_previous_image = resize(hsi_previous_image, (previous_image.size[1], previous_image.size[0], num_bands))
-                hsi_current_image = resize(hsi_current_image, (current_image.size[1], current_image.size[0], num_bands))
-                
-                
-                # # create a figure that displays all three images as subplots, use the first channel layer of each image 
-                # fig, ax = plt.subplots(1, 3, figsize=(15, 5))
-                # ax[0].imshow(hsi_original_image[:, :, 0], cmap='gray')
-                # ax[0].set_title("Original Image")
-                # ax[1].imshow(hsi_previous_image[:, :, 0], cmap='gray')
-                # ax[1].set_title("Previous Image")
-                # ax[2].imshow(hsi_current_image[:, :, 0], cmap='gray')
-                # ax[2].set_title("Current Image")
+                # for the bounding boxes that are sequential, make sure that there are no large jumps in the area of the bounding box
+                # likely means that there is an outlier and result should be modified 
                 
                 
                 
-                
-                
-                
-                
-                
-
-                # print("original object box:", box)
-                # print("previous object box:", output_track_boxes[-1])
-                # print("original object mask shape:", binary_mask.shape)
-                # print("previous object mask shape:", previous_mask.shape)
-                # print("original image size:", original_image.size)
-                # print("previous image size:", previous_image.size)
-                # print("current image size:", current_image.size)
-                
-                
-                # print("shape of hsi images", hsi_original_image.shape, hsi_previous_image.shape, hsi_current_image.shape, "shape of masks", binary_mask.shape, previous_mask.shape, "shape of rgb images", original_image.size, previous_image.size, current_image.size)
-                
-                # Get the median RGB values for the original and previous images
-                # median_rgb_original = get_median_rgb(original_image, binary_mask)
-                # median_rgb_previous = get_median_rgb(previous_image, previous_mask)
-                median_hsi_original, orig_coords = get_median_rgb(hsi_original_image, binary_mask)
-                median_hsi_previous, prev_corrds = get_median_rgb(hsi_previous_image, previous_mask)
-
-                # print(median_hsi_original.shape)
-                # print("Median RGB values in the original image:", median_rgb_original, median_hsi_original)
-                # print("Median RGB values in the previous image:", median_rgb_previous, median_hsi_previous)
-                # print("output logits shape", out_mask_logits[0].shape)
-                # print("hsi image shape", hsi_current_image.shape)            
-                
-                # find the pixels in the current image that are closest to the median rgb values
-                # find the closest pixel to the median rgb values
                 current_image_np = np.array(current_image)
-                
-                
                 
 
                 # Check if the closest pixels are within the previous object box plus a threshold
                 prev_box = output_track_boxes[-1]
                 x_min, y_min, x_max, y_max = prev_box
                 # multiply threshold be number of frames since last success
-                x_min -= threshold * (out_frame_idx - previous_success_index)
-                y_min -= threshold * (out_frame_idx - previous_success_index)
-                x_max += threshold * (out_frame_idx - previous_success_index)
-                y_max += threshold * (out_frame_idx - previous_success_index)
+                x_min -= threshold #* (out_frame_idx - previous_success_index)
+                y_min -= threshold #* (out_frame_idx - previous_success_index)
+                x_max += threshold #* (out_frame_idx - previous_success_index)
+                y_max += threshold #* (out_frame_idx - previous_success_index)
                 
                 # make sure the box is within the image size
                 x_min = int(max(x_min, 0))
@@ -846,166 +1216,34 @@ for current_video_sub_dir in video_sub_dirs:
                 x_max = int(min(x_max, current_image_np.shape[1]))
                 y_max = int(min(y_max, current_image_np.shape[0]))
                 
-
-                # Extract the ROI from the current image
                 roi_rgb = current_image_np[y_min:y_max, x_min:x_max]
-                roi_hsi = hsi_current_image[y_min:y_max, x_min:x_max]
-                roi_logits = np.squeeze((out_mask_logits[0]).cpu().numpy())[y_min:y_max, x_min:x_max]
                 
-                # print(roi_logits)
-                # print(roi_hsi.shape, roi_logits.shape, np.max(roi_logits), np.min(roi_logits))
+                depth_prediction_np = np.array(depth_prediction)
+                roi_depth = depth_prediction_np[y_min:y_max, x_min:x_max]
                 
-                # # print("ROI shape initial:", roi_hsi.shape)
-
-                # # Flatten the ROI for distance calculation
-                # # roi_flatten = roi.reshape(-1, 3)
-                # roi_hsi_flatten = roi_hsi.reshape(-1, 16)
-
-
-                # # flatten the image array
-                # # current_image_flatten = current_image_np.reshape(-1, 3)
+                # get max value in mask region 
+                mask_depth_full = depth_prediction_np * (previous_mask) 
+                mask_depth_mask = mask_depth_full[y_min:y_max, x_min:x_max]
+                max_depth = np.max(mask_depth_mask)
+                # print(f"Max depth in roi: {max_depth}")
                 
-                # # calculate the distance between the median rgb values and the pixels in the current image
-                # # distance_original = np.linalg.norm(current_image_flatten - median_rgb_original, axis=1)
-                # # distance_original = np.linalg.norm(roi_flatten - median_rgb_original, axis=1)
-                # # distance_original = np.linalg.norm(roi_hsi_flatten - median_hsi_original, axis=1)
-
-                # #use spectral similarity instead of euclidean distance
+                # get max value in roi_depth that is not in the mask
+                mask_depth_full = depth_prediction_np * (-1+previous_mask) * (-1)
+                mask_depth = mask_depth_full[y_min:y_max, x_min:x_max]
+                # mask_depth = mask_depth.flatten()
+                # mask_depth = mask_depth[mask_depth != 0]
+                max_mask_depth = np.max(mask_depth)
+                # print(f"Max depth not in mask: {max_mask_depth}")
                 
-                # # create a new function to take in mxc and 1xc and return mx1 which has the lowest dissimilarity
+                # larger values mean closer to the camera
+                # so if max_mask_depth is greater than max_depth, then likely that the object is occluded
+                # if max_mask_depth > max_depth:
+                #     print("Object is possibly occluded")
                 
-                # # print(distance_original) 
-                # # print(len(distance_original), len(roi_hsi_flatten))
-                
-                # distance_original = spectral_similarity_analysis(roi_hsi_flatten, median_hsi_original)
-
-                # # print("spectral analysis result", np.argmin(tmp_result),np.min(tmp_result),"lin alg norm result", np.argmin(distance_original),  np.min(distance_original))
-                # # print(tmp_result.shape, distance_original.shape)
-                
-                
-                # # sys.exit()
-                # # find the index of the pixel with the smallest distance
-                # # closest_pixel_idx_original = np.argmin(distance_original)
-                # closest_pixel_idx_original = np.argmin(distance_original)
-                # # convert the index to 2D coordinates
-                # # closest_pixel_coords_orig = np.unravel_index(closest_pixel_idx_original, current_image_np.shape[:2])
-                # # print("Closest pixel coordinates in the original image:", closest_pixel_coords_orig, np.min(distance_original), "rgb pixel values current", current_image_np[closest_pixel_coords_orig[0], closest_pixel_coords_orig[1]], "mediam rgb original img", median_rgb_original) 
-                # # closest_pixel_coords_orig = np.unravel_index(closest_pixel_idx_original, roi.shape[:2])
-                # # closest_pixel_coords_orig = (closest_pixel_coords_orig[0] + y_min, closest_pixel_coords_orig[1] + x_min)
-                
-                
-                # # not sure if the unravel is correct right now
-                # closest_pixel_coords_orig = np.unravel_index(closest_pixel_idx_original, roi_hsi.shape[:2])
-                
-                # # print("roi unravel shape", closest_pixel_coords_orig)
-                # # sys.exit()
-                
-                # closest_pixel_coords_orig = (closest_pixel_coords_orig[0] + y_min, closest_pixel_coords_orig[1] + x_min)
-
-                # print("Closest pixel coordinates in the original image within the bounding box:", closest_pixel_coords_orig, "difference amount", np.min(distance_original), "rgb pixel values current", current_image_np[closest_pixel_coords_orig[0], closest_pixel_coords_orig[1]])
-
-                
-                # # find the pixels in the previous image that are closest to the median rgb values
-                # # distance_previous = np.linalg.norm(current_image_flatten - median_rgb_previous, axis=1)
-                # # distance_previous = np.linalg.norm(roi_flatten - median_rgb_previous, axis=1)
-                # # distance_previous = np.linalg.norm(roi_hsi_flatten - median_hsi_previous, axis=1)
-                # # closest_pixel_coords_previous = np.unravel_index(closest_pixel_idx_previous, current_image_np.shape[:2])
-                # # print("Closest pixel coordinates in the previous image:", closest_pixel_coords_previous,  np.min(distance_original), "rgb pixel values current", current_image_np[closest_pixel_coords_previous[0], closest_pixel_coords_previous[1]], "mediam rgb previous img", median_rgb_previous)
-                # distance_previous = spectral_similarity_analysis(roi_hsi_flatten, median_hsi_previous)
-                
-                # closest_pixel_idx_previous = np.argmin(distance_previous)
-
-                
-                # closest_pixel_coords_previous = np.unravel_index(closest_pixel_idx_previous, roi_hsi.shape[:2])
-                # closest_pixel_coords_previous = (closest_pixel_coords_previous[0] + y_min, closest_pixel_coords_previous[1] + x_min)
-
-                # print("Closest pixel coordinates in the previous image within the bounding box:", closest_pixel_coords_previous, "difference amount", np.min(distance_previous), "rgb pixel values current", current_image_np[closest_pixel_coords_previous[0], closest_pixel_coords_previous[1]])
-
-                """
-                roi_image =  current_image_np[y_min:y_max, x_min:x_max]
-                roi_mask_results = roi_mask_generator.generate(roi_image)
-                
-                # for each mask - cluster, compare the largest spectrally similar cluster centroid and use that as the point to add to the tracker 
-                
-                # spectral similarity analysis function for each cluster centroid - original image and previopus image 
-                # reprompt with the closest centroid to the previous object centroid
-                # largest to smallest mask 
-                # biggest cluster centroid 
-
-                # step 1 sort the masks by size 
-                # step 2 get the centroid of the largest mask
-                # step 3 spectral analysis until a match is found
-                
-                # sorting by area, can also sort by mask quality 
-                sorted_anns = sorted(roi_mask_results, key=(lambda x: x['area']), reverse=True)
-                # print("Number of masks", len(sorted_anns))
-                # print(sorted_anns)
-                # print("original image shape", hsi_original_image.shape, binary_mask.shape)
-                added_point = False
-                for ann in sorted_anns: 
-                    
-                    if ann['area'] < min_obj_area:
-                        continue
-                    
-                    # print("mask segmentation shape", ann['segmentation'].shape)
-                    ann_result_spectrum, centroid_coords = get_median_rgb(roi_hsi, ann['segmentation'])
-                    # print(ann_result_spectrum.shape)
-                    
-                    # get corrdinates of where ann_result_spectrum is located in the image
-                    
-                    
-                    distance_original_ann = spectral_angle_mapper(ann_result_spectrum, median_hsi_original)
-                    distance_previous_ann = spectral_angle_mapper(ann_result_spectrum, median_hsi_previous)
-                    # print("Spectral similarity analysis for mask", ann['segmentation'].shape,(distance_original_ann),(distance_previous_ann))
-                    
-                    if distance_original_ann < norm_threshold or distance_previous_ann < norm_threshold:
-
-                        print("Adding new point to the tracker. based on mask with area", ann['area'])
-                        # convert from roi coordinates to image coordinates
-                        best_match_coords = (centroid_coords[0] + y_min, centroid_coords[1] + x_min)
-                        added_point = True
-                        # break from for loop
-                        break
-                    
-                if added_point is False:
-                    print("No valid point found within the threshold. scores were", distance_original_ann, distance_previous_ann)
-                    # sys.exit()
-                    continue
-                
-                # sys.exit()
-                
-                
-                plt.figure()
-                plt.imshow(roi_image)
-                show_anns(roi_mask_results)
-                # plt.show()
-                # print(roi_image.shape, "displayed image")
-
-                """
-
-
-
-                # check to see if either of the closet pixels are within the previous object box plus a threshold
-                # if they are, add a new point to the tracker
-                
-                
-                # if np.min(distance_original) < norm_threshold and np.min(distance_original ) < np.min(distance_previous):
-                #     print("Adding new point to the tracker. based on original image")
-                #     best_match_coords = closest_pixel_coords_orig
-                # elif np.min(distance_previous) < norm_threshold and np.min(distance_previous) < np.min(distance_original):
-                #     print("Adding new point to the tracker. based on previous image")
-                #     best_match_coords = closest_pixel_coords_previous
-                # else:
-                #     print("No valid point found within the threshold.")
-                #     # sys.exit()
-                #     continue
                 
                 ekf.predict()
                 best_match_coords = ekf.x[:2].flatten()
                 best_match_coords = np.round(best_match_coords).astype(int)
-                
-                
-                
                 
                 
                 # make sure the coordinates are within the image size
@@ -1013,58 +1251,6 @@ for current_video_sub_dir in video_sub_dirs:
                 best_match_coords[1] = int(max(best_match_coords[1], 0))
                 best_match_coords[0] = int(min(best_match_coords[0], current_image_np.shape[0] - 1))
                 best_match_coords[1] = int(min(best_match_coords[1], current_image_np.shape[1] - 1))
-                
-                
-                
-                """
-                # get object mask for the corresponding object that is prompted with best_match_coords
-                # cluster the results and if spectral match then add it 
-                # do multi mask, pass each to see if it is a match
-                image_predictor = SAM2ImagePredictor(sam2_image)
-                image_predictor.set_image(current_image)
-                input_point = np.array([[best_match_coords[1] , best_match_coords[0]]])
-                input_label = np.array([1])
-                
-                # print(input_point, input_label, best_match_coords[0], best_match_coords[1])
-                masks, scores, logits = image_predictor.predict(
-                    point_coords=input_point,
-                    point_labels=input_label,
-                    multimask_output=True,
-                )
-                sorted_ind = np.argsort(scores)[::-1]
-                masks = masks[sorted_ind]
-                scores = scores[sorted_ind]
-                logits = logits[sorted_ind]
-                
-                # plt.figure(figsize=(10, 10))
-                # plt.imshow(current_image)
-                # show_points(input_point, input_label, plt.gca())
-                # plt.axis('on')
-                # plt.show()  
-                # show_masks(current_image, masks, scores, point_coords=input_point, input_labels=input_label, borders=True)
-                add_new_point = False
-                for mask in masks :
-                    # print(mask.shape, hsi_current_image.shape)
-                    mask = mask.astype(bool)
-                    # print(np.min(mask), np.max(mask))
-                    
-                    object_spectra, centroid_coords = get_median_rgb(hsi_current_image, mask)
-                    
-                    similarity_result_orig = spectral_angle_mapper(object_spectra, median_hsi_original)
-                    similarity_result_prev = spectral_angle_mapper(object_spectra, median_hsi_previous)
-                    
-                    # print(similarity_result_orig, similarity_result_prev)
-                    if similarity_result_orig <= norm_threshold or similarity_result_prev <= norm_threshold:
-                        print("Adding new point to the tracker. based on spectral similarity")
-                        add_new_point = True
-                        # show_masks(current_image, masks, scores, point_coords=input_point, input_labels=input_label, borders=True)
-                        break
-                    
-                if add_new_point is False:
-                    print("No valid point found within the threshold.")
-                    continue
-                """
-                
                 
                 
                 
@@ -1077,27 +1263,15 @@ for current_video_sub_dir in video_sub_dirs:
                     labels= np.array([1], np.int32), # 1 is positive, 0 is negative 
                     # box = box,
                 )
-
-                # sys.exit()
-
                 
-                # if is_within_box(closest_pixel_coords_previous, x_min, y_min, x_max, y_max):
-                #     print("Adding new point to the tracker. based on previous image")
-                # elif is_within_box(closest_pixel_coords_orig, x_min, y_min, x_max, y_max): 
-                #     print("Adding new point to the tracker. based original image")   
-                # else:
-                #     print("No valid point found within the threshold.")
-
-                # sys.exit()
                 
                 # plot original image, previous image, current image
-                fig, ax = plt.subplots(1, 4, figsize=(20, 5))
+                fig, ax = plt.subplots(1, 6, figsize=(20, 5))
                 ax[0].imshow(original_image)
                 show_mask(binary_mask, ax[0], obj_id=ann_obj_id)  # Use show_mask function
                 ax[0].set_title("Original Image")
                 rect = patches.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1], linewidth=2, edgecolor='r', facecolor='none')
                 ax[0].add_patch(rect)
-                ax[0].scatter(orig_coords[1], orig_coords[0], color='red', marker='x', s=100)
 
 
                 ax[1].imshow(previous_image)
@@ -1106,78 +1280,96 @@ for current_video_sub_dir in video_sub_dirs:
                 prev_box = output_track_boxes[-1]
                 rect = patches.Rectangle((prev_box[0], prev_box[1]), prev_box[2] - prev_box[0], prev_box[3] - prev_box[1], linewidth=2, edgecolor='r', facecolor='none')
                 ax[1].add_patch(rect)
-                ax[1].scatter(prev_corrds[1], prev_corrds[0], color='red', marker='x', s=100)
 
-
-                
                     
                 ax[2].imshow(current_image)
-                # plot y,x instead of 
                 ax[2].scatter(best_match_coords[1], best_match_coords[0], color='red', marker='x', s=100)  # Add marker for best match
-                # ax[2].scatter(predicted_center[1], predicted_center[0], color='blue', marker='x', s=100)
-                # ax[2].scatter(350,169, color='green', marker='x', s=100)  # Add marker for best match
+                show_mask(previous_mask, ax[2], obj_id=ann_obj_id)  # Use show_mask function
                 ax[2].set_title("Current Image")
+                rect = patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, linewidth=2, edgecolor='r', facecolor='none')
+                ax[2].add_patch(rect)
+             
+                ax[3].imshow(depth_prediction)
+                ax[3].set_title("Current Depth Image")
+                rect = patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, linewidth=2, edgecolor='r', facecolor='none')
+                ax[3].add_patch(rect)
                 
-                # Add a rectangle for the ROI on the current frame
-                # roi_rect = patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, linewidth=2, edgecolor='b', facecolor='none')
-                # ax[2].add_patch(roi_rect)
+                ax[4].imshow(mask_depth_mask)
                 
-                # Plot the median HSI values
-                ax[3].plot(median_hsi_original, label='Spectrum of Cluster Centroid - Original Image')
-                ax[3].plot(median_hsi_previous, label='Spectrum of Cluster Centroid - Previous Image')
-                # Extract the pixel values at the best match coordinates from the current image
-                best_match_pixel_values = hsi_current_image[best_match_coords[0], best_match_coords[1]]  
-                ax[3].plot(best_match_pixel_values, label='Predicted Object Location', linestyle='--')    
-                    
-                # test_pixel = hsi_current_image[169,350]
-                # ax[3].plot(test_pixel, label='Test Pixel Values', linestyle='--')
-
-
-                ax[3].set_title("Median HSI Values")
-                ax[3].legend()
+                ax[5].imshow(mask_depth)
                 
                 # plt.show()
                 
-                
-                
-               
-               
                 
                 previous_mask = result_mask*0
                 
-                # if current_reprompts < max_reprompts:
-                    
+                
                 break
                 
-                
-                # sys.exit()
-                
-            
+         
+        # find where lines of output_track_boxes are [0, 0, 0, 0]
+        # interpolate the values between the previous non zero value and the next non zero value
+        # print(output_track_boxes)
 
-                # # render the segmentation results every few frames
-                # vis_frame_stride = 30
-                # plt.close("all")
-                # for out_frame_idx in range(0, len(frame_names), vis_frame_stride):
-                #     plt.figure(figsize=(6, 4))
-                #     plt.title(f"frame {out_frame_idx}")
-                #     plt.imshow(Image.open(os.path.join(video_dir, frame_names[out_frame_idx])))
-                #     for out_obj_id, out_mask in video_segments[out_frame_idx].items():
-                #         show_mask(out_mask, plt.gca(), obj_id=out_obj_id)
-                
-                # plt.show()
-                
-                
-                
+        # # Function to interpolate between two points
+        # def interpolate_boxes(start_box, end_box, num_steps):
+        #     interpolated_boxes = []
+        #     for i in range(1, num_steps + 1):
+        #         interpolated_box = start_box + (end_box - start_box) * (i / (num_steps + 1))
+        #         interpolated_boxes.append(interpolated_box)
+        #     return interpolated_boxes
+
+        # # Convert output_track_boxes to a numpy array for easier manipulation
+        # output_track_boxes = np.array(output_track_boxes)
+
+        # # Find indices of zero-value boxes
+        # zero_indices = np.where((output_track_boxes == [0, 0, 0, 0]).all(axis=1))[0]
+
+        # # Iterate over zero-value indices and interpolate
+        # for zero_idx in zero_indices:
+        #     # Find the previous non-zero box
+        #     prev_idx = zero_idx - 1
+        #     while prev_idx >= 0 and (output_track_boxes[prev_idx] == [0, 0, 0, 0]).all():
+        #         prev_idx -= 1
             
+        #     # Find the next non-zero box
+        #     next_idx = zero_idx + 1
+        #     while next_idx < len(output_track_boxes) and (output_track_boxes[next_idx] == [0, 0, 0, 0]).all():
+        #         next_idx += 1
             
+        #     # If both previous and next non-zero boxes are found, interpolate
+        #     if prev_idx >= 0 and next_idx < len(output_track_boxes):
+        #         prev_box = output_track_boxes[prev_idx]
+        #         next_box = output_track_boxes[next_idx]
+        #         num_steps = next_idx - prev_idx - 1
+        #         interpolated_boxes = interpolate_boxes(prev_box, next_box, num_steps)
+                
+        #         # Insert interpolated boxes into output_track_boxes
+        #         output_track_boxes[prev_idx + 1:next_idx] = interpolated_boxes
+
+        # # Handle trailing zero-value boxes by repeating the last non-zero box
+        # last_non_zero_idx = len(output_track_boxes) - 1
+        # while last_non_zero_idx >= 0 and (output_track_boxes[last_non_zero_idx] == [0, 0, 0, 0]).all():
+        #     last_non_zero_idx -= 1
+
+        # if last_non_zero_idx >= 0:
+        #     last_non_zero_box = output_track_boxes[last_non_zero_idx]
+        #     for zero_idx in zero_indices:
+        #         if zero_idx > last_non_zero_idx:
+        #             output_track_boxes[zero_idx] = last_non_zero_box
+        
+        # # Convert output_track_boxes back to a list of lists
+        # output_track_boxes = output_track_boxes.tolist()
+        
         # save results to result_output_name file
+        # plt.show()
         if all_points_annotated:
             print(f"Saving results to {result_output_name}")
             with open(result_output_name, 'w') as f:
                 for box in output_track_boxes:
                     x_min, y_min, x_max, y_max = box
                     f.write(f"{int(x_min)}\t{int(y_min)}\t{int(x_max-x_min)}\t{int(y_max-y_min)}\n")
-            
+        plt.show()   
 print("Done!")
 print(video_base_dir)
 print("Number of directories with tracks lost:", len(no_objects_detected_dirs))

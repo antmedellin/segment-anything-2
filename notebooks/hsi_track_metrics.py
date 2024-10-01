@@ -165,13 +165,13 @@ def compile_results(gt, bboxes):
 # predicted_dir = 'notebooks/results/validation/HSI-RedNIR-FalseColor'
 # ground_truth_dir = '../hsi_tracking/datasets/validation/HSI-RedNIR-FalseColor/'
 
-# predicted_dir = 'notebooks/results/validation/HSI-VIS-FalseColor'
-# ground_truth_dir = '../hsi_tracking/datasets/validation/HSI-VIS-FalseColor/'
+predicted_dir = 'notebooks/results/validation/HSI-VIS-FalseColor'
+ground_truth_dir = '../hsi_tracking/datasets/validation/HSI-VIS-FalseColor/'
 
 
-predicted_dir = 'notebooks/results/development'
+# predicted_dir = 'notebooks/results/development'
 # ground_truth_dir = '../hsi_tracking/datasets/validation/HSI-VIS-FalseColor/'
-ground_truth_dir = '../hsi_tracking/datasets/validation/HSI-RedNIR-FalseColor/'
+# # ground_truth_dir = '../hsi_tracking/datasets/validation/HSI-RedNIR-FalseColor/'
 
 
 result_output = 'tracking_metrics_results.csv'

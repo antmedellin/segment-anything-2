@@ -388,7 +388,7 @@ sam2_checkpoint = "checkpoints/sam2_hiera_tiny.pt"
 model_cfg = "sam2_hiera_t.yaml"
 
 # Define the threshold to exapand box by
-threshold = 1 # allowable change in box coordinates to prevent large changes in results, expand box by this threshold for each frame since previous success
+threshold = 3 # allowable change in box coordinates to prevent large changes in results, expand box by this threshold for each frame since previous success
 norm_threshold = 15 # spectral similarity allowed 
 min_obj_area = 50 
 
@@ -439,23 +439,23 @@ with torch.autocast("cuda", dtype=torch.float16):
 # video_base_dir = "../hsi_tracking/datasets/validation/HSI-NIR-FalseColor"
 # relative_path_to_hsi = "../../../HSI-NIR"
 
-# results_output_dir = "notebooks/results/validation/HSI-VIS-FalseColor"
-# video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor"
-# relative_path_to_hsi = "../../../HSI-VIS"
+results_output_dir = "notebooks/results/validation/HSI-VIS-FalseColor"
+video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor"
+relative_path_to_hsi = "../../../HSI-VIS"
 
-results_output_dir = "notebooks/results/validation/HSI-RedNIR-FalseColor"
-video_base_dir = "../hsi_tracking/datasets/validation/HSI-RedNIR-FalseColor"
-relative_path_to_hsi = "../../HSI-RedNIR"
+# results_output_dir = "notebooks/results/validation/HSI-RedNIR-FalseColor"
+# video_base_dir = "../hsi_tracking/datasets/validation/HSI-RedNIR-FalseColor"
+# relative_path_to_hsi = "../../HSI-RedNIR"
 
 
-results_output_dir = "notebooks/results/development"
-# video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor/S_runner1"
+# results_output_dir = "notebooks/results/development"
+# # video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor/S_runner1"
 # video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor/oranges5"
-# # video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor/droneshow2"
-# video_base_dir = "../hsi_tracking/datasets/training/HSI-VIS-FalseColor/car6"
+# # # video_base_dir = "../hsi_tracking/datasets/validation/HSI-VIS-FalseColor/droneshow2"
+# # video_base_dir = "../hsi_tracking/datasets/training/HSI-VIS-FalseColor/car6"
 # relative_path_to_hsi = "../../../HSI-VIS"
-video_base_dir = "../hsi_tracking/datasets/validation/HSI-RedNIR-FalseColor/duck4"
-relative_path_to_hsi = "../../HSI-RedNIR"
+# # video_base_dir = "../hsi_tracking/datasets/validation/HSI-RedNIR-FalseColor/duck4"
+# # relative_path_to_hsi = "../../HSI-RedNIR"
 
 # num_bands = 16 # 1, 25 (16 vis, 25 nir, 16 rednir (last column all zeros))
 num_bands = 16
@@ -730,10 +730,10 @@ for current_video_sub_dir in video_sub_dirs:
         object_ekf =  WidthHeightKalmanFilter(dt) # 2 states, each state is a 1d value
         # object_ekf.Q = np.diag([1,1])
         # object_ekf.R = np.diag([3,3])
-        object_ekf.Q_width = np.diag([1, 1])
-        object_ekf.Q_height = np.diag([1, 1])
-        object_ekf.R_width = np.diag([3])
-        object_ekf.R_height = np.diag([3])
+        object_ekf.Q_width = np.diag([1, .5])
+        object_ekf.Q_height = np.diag([1, .5])
+        object_ekf.R_width = np.diag([10])
+        object_ekf.R_height = np.diag([10])
         
         # get the width and height of the object using the bounding box 
         initial_width = box[2] - box[0]
@@ -749,12 +749,12 @@ for current_video_sub_dir in video_sub_dirs:
         # keep track of center of modal mask, not center of object 
         modal_ekf = ExtendedKalmanFilter(dt, state_dim, measurement_dim)
         # Process noise covariance
-        modal_ekf.Q = np.diag([1, 1, 0.5, 0.5])
+        modal_ekf.Q = np.diag([1,1,.5,.5])
         # Measurement noise covariance
-        modal_ekf.R = np.diag([5,5])
+        modal_ekf.R = np.diag([10,10])
         # Initial state [x, y, vx, vy]
         initial_center = get_center_of_mask(binary_mask)
-        print(f"Initial center: {initial_center}")
+        # print(f"Initial center: {initial_center}")
         modal_ekf.x[:2] = initial_center.reshape(-1, 1)
         
         # Initialize the plot
@@ -792,7 +792,7 @@ for current_video_sub_dir in video_sub_dirs:
                     frame_width = result_box[2] - result_box[0]
                     frame_height = result_box[3] - result_box[1]
                     
-                    # # get previous width and height
+                    # get previous width and height
                     if out_frame_idx > 0:
                         prev_width = output_track_boxes[-1][2] - output_track_boxes[-1][0]
                         prev_height = output_track_boxes[-1][3] - output_track_boxes[-1][1]
@@ -809,7 +809,7 @@ for current_video_sub_dir in video_sub_dirs:
                     predicted_width = object_ekf.x[0][0]
                     predicted_height = object_ekf.x[1][0]
                             
-                    # if  np.sum(result_mask)/(frame_width * frame_height)  < 0.75:
+                    # if  np.sum(result_mask)/(frame_width * frame_height)  < 0.75 and out_frame_idx > 1:
                         
                     #     # Find the box that maximizes the logits score and is of the predicted width and height
                     #     max_score = -np.inf
@@ -825,8 +825,9 @@ for current_video_sub_dir in video_sub_dirs:
                     #     result_box = best_box
                     
                     
-                    if (frame_width > 1.5 * prev_width or frame_height > 1.5 * prev_height) and out_frame_idx > 1:
-                        
+                    # if frame_width > 1.5 * prev_width or frame_height > 1.5 * prev_height:
+                    if (frame_width > 3 * prev_width or frame_height > 3 * prev_height) and out_frame_idx > 1:
+                    # if False:
                         # print(f"Previous width: {prev_width}, Previous height: {prev_height}")
                         # print(f"Current width: {frame_width}, Current height: {frame_height}")
                         # print(f"Previous box: {output_track_boxes[-1]}")
@@ -836,7 +837,7 @@ for current_video_sub_dir in video_sub_dirs:
                         # print("Large jump in object size detected in frame", out_frame_idx)
                         # use the previous box
                         result_box = output_track_boxes[-1]
-                        # x_min, y_min, x_max, y_max = result_box
+                        x_min, y_min, x_max, y_max = result_box
                         
                         
                         
@@ -853,8 +854,8 @@ for current_video_sub_dir in video_sub_dirs:
 
                         # result_box = best_box
                         # x_min, y_min, x_max, y_max = result_box
-                
                     
+                    # print("starting results " , result_box)
                     
                     # below is for occlusions 
                     
@@ -1155,138 +1156,16 @@ for current_video_sub_dir in video_sub_dirs:
                         current_width = result_box[2] - result_box[0]
                         current_height = result_box[3] - result_box[1]
                         
-                        # comment out for now but should propogate ekf properly 
-                        # object_ekf.predict()
-                        # print(f"Predicted width: {object_ekf.x[0][0]}, height: {object_ekf.x[0][1]}, actual width: {current_width}, actual height: {current_height}")
+                        # # comment out for now but should propogate ekf properly 
                         # object_ekf.update(np.array([current_width, current_height]))
+                        # object_ekf.predict()
+                        # # print(f"Predicted width: {object_ekf.x[0][0]}, height: {object_ekf.x[0][1]}, actual width: {current_width}, actual height: {current_height}")
                         
-                        
-                    
-                    
-                    # print("reached here")
-                    
-                    
-                    
-                    # compare the area of the box to the previous box
-                    # if there is a large change in area, then likely an outlier and should be modified
-                    # if out_frame_idx > 1:
-                    #     previous_box_points = output_track_boxes[-1]
-                    #     previous_area = (previous_box_points[2] - previous_box_points[0]) * (previous_box_points[3] - previous_box_points[1])
-                    #     current_area = (result_box[2] - result_box[0]) * (result_box[3] - result_box[1])
-                        
-                    #     # calculate the percentage change in area
-                    #     area_change = abs(previous_area - current_area) / previous_area
-                    #     if area_change > allowable_area_change:
-                    #         # print(f"Area change too large: {area_change}")
-                    #         raise Exception("Area change too large")
-                    
-                    
-                    # verify that the box corners did not change by more than the allowable threshold
-                    # if they did then set the box corners to the threshold amount 
-                    # if out_frame_idx > 1:
-                    #     previous_box_points = output_track_boxes[-1]
-                       
-                    #     # look at change in box corners by allowing a threshold amount of change
-                    #     # for i in range(4):
-                    #     #     if abs(previous_box_points[i] - result_box[i]) > threshold:
-                    #     #         print(f"Box corner {i} changed by more than threshold by {abs(previous_box_points[i] - result_box[i])}")
-                    #     #         result_box[i] = previous_box_points[i] + np.sign(result_box[i] - previous_box_points[i]) * threshold
-                                
-                    #     # rather than look at change in corners 
-                    #     # look at the change in height and width in relation to the center of the box # make sure this does not change too much because the object should not change shape too much
-                    #     # allows for better tracking of the dynamic 
-                    #     # try not to let the change exceed more than 10% of the box size
-
-                    #     # # Calculate the center, height, and width of the previous box
-                    #     # prev_center_x = (previous_box_points[0] + previous_box_points[2]) / 2
-                    #     # prev_center_y = (previous_box_points[1] + previous_box_points[3]) / 2
-                    #     # prev_width = previous_box_points[2] - previous_box_points[0]
-                    #     # prev_height = previous_box_points[3] - previous_box_points[1]
-                        
-                    #     # # Calculate the center, height, and width of the current box
-                    #     # curr_center_x = (result_box[0] + result_box[2]) / 2
-                    #     # curr_center_y = (result_box[1] + result_box[3]) / 2
-                    #     # curr_width = result_box[2] - result_box[0]
-                    #     # curr_height = result_box[3] - result_box[1]
-                        
-                    #     # # Calculate the percentage change in width and height
-                    #     # width_change = abs(curr_width - prev_width) / (prev_width+1)
-                    #     # height_change = abs(curr_height - prev_height) / (prev_height+1) # add 1 to prevent division by zero
-                        
-                        
-                    #     # # Define the threshold for maximum allowable change (15% of the previous box size)
-                    #     # percent_change_threshold = 0.15
-                        
-                        
-                    #     # # If the change exceeds 10%, adjust the current box dimensions
-                    #     # if width_change > percent_change_threshold:
-                    #     #     # print(f"Width change too large: {width_change}")
-                    #     #     curr_width = prev_width * (1+percent_change_threshold) if curr_width > prev_width else prev_width * (1-percent_change_threshold)
-                    #     #     # result_box[0] = curr_center_x - curr_width / 2
-                    #     #     # result_box[2] = curr_center_x + curr_width / 2
-                    #     #     # Check and adjust corner points if they exceed the threshold
-                    #     #     for i in [0, 2]:
-                    #     #         if abs(previous_box_points[i] - result_box[i]) > threshold:
-                    #     #             print(f"Box corner {i} changed by more than threshold by {abs(previous_box_points[i] - result_box[i])}")
-                    #     #             option1 = previous_box_points[i] + np.sign(result_box[i] - previous_box_points[i]) * threshold
-                    #     #             option2 = previous_box_points[i] + np.sign(result_box[i] - previous_box_points[i]) * curr_width / 2
-                    #     #             result_box[i] = option1 if abs(option1 - result_box[i]) < abs(option2 - result_box[i]) else option2
-                                    
-                                    
-
-                        
-                    #     # if height_change > percent_change_threshold:
-                    #     #     # print(f"Height change too large: {height_change}")
-                    #     #     curr_height = prev_height * (1+percent_change_threshold) if curr_height > prev_height else prev_height * (1-percent_change_threshold)
-                    #     #     # result_box[1] = curr_center_y - curr_height / 2
-                    #     #     # result_box[3] = curr_center_y + curr_height / 2
-                    #     #     for i in [1, 3]:
-                    #     #         if abs(previous_box_points[i] - result_box[i]) > threshold:
-                    #     #             print(f"Box corner {i} changed by more than threshold by {abs(previous_box_points[i] - result_box[i])}")
-                    #     #             option1 = previous_box_points[i] + np.sign(result_box[i] - previous_box_points[i]) * threshold
-                    #     #             option2 = previous_box_points[i] + np.sign(result_box[i] - previous_box_points[i]) * curr_height / 2
-                    #     #             result_box[i] = option1 if abs(option1 - result_box[i]) < abs(option2 - result_box[i]) else option2
-
-
-                    # # # make sure the box is within the image size
-                    # # current_image = Image.open(os.path.join(video_dir, frame_names[out_frame_idx]))
-                    # # current_image_np = np.array(current_image)
-                    # # result_box[0] = int(max(result_box[0], 0))
-                    # # result_box[1] = int(max(result_box[1], 0))
-                    # # result_box[2] = int(min(result_box[2],  current_image_np.shape[0] - 1))
-                    # # result_box[3] = int(min(result_box[3], current_image_np.shape[1] - 1))
-                    
-                    # # with torch.autocast("cuda", dtype=torch.float16):
-                    # #     predictions = pipe(current_image)
-                    # #     depth_prediction = predictions["depth"]
-                    
-                    
-                    # # depth_threshold = 5 
-                    # # x_min, y_min, x_max, y_max = result_box
-                    # # # multiply threshold be number of frames since last success
-                    # # x_min -= depth_threshold
-                    # # y_min -= depth_threshold 
-                    # # x_max += depth_threshold 
-                    # # y_max += depth_threshold 
-                    
-                    # # # make sure the box is within the image size
-                    # # x_min = int(max(x_min, 0))
-                    # # y_min = int(max(y_min, 0))
-                    # # x_max = int(min(x_max, current_image_np.shape[1]))
-                    # # y_max = int(min(y_max, current_image_np.shape[0]))
-                    
-                    # # roi_rgb = current_image_np[y_min:y_max, x_min:x_max]
-                    
-                    # # #plot the mask and the roi
-                    # # fig, ax = plt.subplots(1, 2, figsize=(20, 5))
-                    # # ax[1].imshow(roi_rgb)
-                    
-                    # # ax[0].imshow(current_image)
-                    # # show_mask(result_mask, ax[0], obj_id=ann_obj_id)
-                    
+                      
                     
                     # # plt.show()
-                    if frame_idx == 0:
+                    # print("final results ", result_box)
+                    if out_frame_idx == 0:
                         result_box = new_box
                         
                     output_track_boxes.append(result_box)
@@ -1295,17 +1174,21 @@ for current_video_sub_dir in video_sub_dirs:
                     previous_success_index = out_frame_idx
                     
                     # # Predicted center of the mask
-                    # ekf.predict()
+                    modal_ekf.predict()
                     predicted_center = modal_ekf.x[:2].flatten()
 
                     # new_center = get_center_of_mask(result_mask)
                     
                     # get center of result_box 
                     new_center = np.array([(result_box[1] + result_box[3]) / 2, (result_box[0] + result_box[2]) / 2])
+                    # new_center = np.array([(result_box[0] + result_box[2]) / 2, (result_box[1] + result_box[3]) / 2])
                     
                     modal_ekf.update(new_center.reshape(-1, 1))
-                    # print(f"Predicted center: {predicted_center}, actual center: {new_center}, result box: {result_box}, frame idx: {out_frame_idx}")
-
+                    # print(f"Predicted center: {predicted_center}, actual center: {new_center}, result box: {result_box}, frame idx: {out_frame_idx} ******")
+                    # object_ekf.predict()
+                    current_width = result_box[2] - result_box[0]
+                    current_height = result_box[3] - result_box[1]
+                    # print(f"Predicted width: {object_ekf.x[0][0]}, height: {object_ekf.x[0][1]}, actual width: {current_width}, actual height: {current_height}")
     
                 else:
                     raise Exception("No object detected")
@@ -1319,67 +1202,63 @@ for current_video_sub_dir in video_sub_dirs:
                 
                 # no object detected, append the previous result if available
                 if output_track_boxes:
-                    # output_track_boxes.append(output_track_boxes[-1])
+                    output_track_boxes.append(output_track_boxes[-1])
                     # output_track_boxes.append([0, 0, 0, 0])
                     
-                    # use the kalman filter to predict the next center of the mask
-                    modal_ekf.predict()
-                    predicted_center = modal_ekf.x[:2].flatten()
+                    # # use the kalman filter to predict the next center of the mask
+                    # modal_ekf.predict()
+                    # predicted_center = modal_ekf.x[:2].flatten()
+                    # # get difference between predicted center and previous center and shift the box by that amount
+                    # # shift = predicted_center - new_center
                     
-                    # reverse the predicted center points 
-                    # predicted_center = np.array([predicted_center[1], predicted_center[0]])
+                    # # result_box[0] += shift[1]
+                    # # result_box[1] += shift[0]
+                    # # result_box[2] += shift[1]
+                    # # result_box[3] += shift[0]
                     
+                    # # given predicted center, propogate out the width and height of the object
+                    # # use the predicted width and height to generate box
                     
-                    # get difference between predicted center and previous center and shift the box by that amount
-                    # shift = predicted_center - new_center
-                    
-                    # result_box[0] += shift[1]
-                    # result_box[1] += shift[0]
-                    # result_box[2] += shift[1]
-                    # result_box[3] += shift[0]
-                    
-                    # given predicted center, propogate out the width and height of the object
-                    # use the predicted width and height to generate box
-                    
-                    # Predict the width and height using the Kalman filter
-                    object_ekf.predict()
-                    predicted_width = object_ekf.x[0][0]
-                    predicted_height = object_ekf.x[1][0]
+                    # # Predict the width and height using the Kalman filter
+                    # object_ekf.predict()
+                    # predicted_width = object_ekf.x[0][0]
+                    # predicted_height = object_ekf.x[1][0]
 
-                    # Calculate the new bounding box coordinates based on the predicted center and the predicted width and height
-                    x_min = int(predicted_center[1] - predicted_width / 2)
-                    y_min = int(predicted_center[0] - predicted_height / 2)
-                    x_max = int(predicted_center[1] + predicted_width / 2)
-                    y_max = int(predicted_center[0] + predicted_height / 2)
+                    # # Calculate the new bounding box coordinates based on the predicted center and the predicted width and height
+                    # x_min = int(predicted_center[1] - predicted_width / 2)
+                    # y_min = int(predicted_center[0] - predicted_height / 2)
+                    # x_max = int(predicted_center[1] + predicted_width / 2)
+                    # y_max = int(predicted_center[0] + predicted_height / 2)
 
-                    result_box = [x_min, y_min, x_max, y_max]
+                    # result_box = [x_min, y_min, x_max, y_max]
                     
-                    current_image = Image.open(os.path.join(video_dir, frame_names[out_frame_idx]))
-                    current_image_np = np.array(current_image)
-                    # make sure the box is within the image size
+                    # current_image = Image.open(os.path.join(video_dir, frame_names[out_frame_idx]))
+                    # current_image_np = np.array(current_image)
+                    # # make sure the box is within the image size
                     
                     
-                    if result_box[0] > current_image_np.shape[0]:
-                        result_box[0] = int(min(result_box[0], current_image_np.shape[0] - 1))
-                    if result_box[1] > current_image_np.shape[1]:
-                        result_box[1] = int(min(result_box[1], current_image_np.shape[1] - 1))
-                    result_box[0] = int(max(result_box[0], 0))
-                    result_box[1] = int(max(result_box[1], 0))
+                    # if result_box[0] > current_image_np.shape[0]:
+                    #     result_box[0] = int(min(result_box[0], current_image_np.shape[0] - 1))
+                    # if result_box[1] > current_image_np.shape[1]:
+                    #     result_box[1] = int(min(result_box[1], current_image_np.shape[1] - 1))
+                    # result_box[0] = int(max(result_box[0], 0))
+                    # result_box[1] = int(max(result_box[1], 0))
                     
-                    if result_box[2] < 0:
-                        result_box[2] = int(max(result_box[2], 0))
-                    if result_box[3] < 0:
-                        result_box[3] = int(max(result_box[3], 0))
+                    # if result_box[2] < 0:
+                    #     result_box[2] = int(max(result_box[2], 0))
+                    # if result_box[3] < 0:
+                    #     result_box[3] = int(max(result_box[3], 0))
                 
-                    result_box[2] = int(min(result_box[2],  current_image_np.shape[0] - 1))
-                    result_box[3] = int(min(result_box[3], current_image_np.shape[1] - 1))
+                    # result_box[2] = int(min(result_box[2],  current_image_np.shape[0] - 1))
+                    # result_box[3] = int(min(result_box[3], current_image_np.shape[1] - 1))
                     
-                    # get previous center 
-                    previous_center = np.array([(output_track_boxes[-1][1] + output_track_boxes[-1][3]) / 2, (output_track_boxes[-1][0] + output_track_boxes[-1][2]) / 2])
+                    # # get previous center 
+                    # previous_center = np.array([(output_track_boxes[-1][1] + output_track_boxes[-1][3]) / 2, (output_track_boxes[-1][0] + output_track_boxes[-1][2]) / 2])
                     
-                    # print(f"predicted center: {predicted_center}, previous center: {previous_center}, result box: {result_box}, frame idx: {out_frame_idx}, predicted width: {predicted_width}, predicted height: {predicted_height}")
+                    # # print(f"predicted center: {predicted_center}, previous center: {previous_center}, result box: {result_box}, frame idx: {out_frame_idx}, predicted width: {predicted_width}, predicted height: {predicted_height}")
                     
-                    output_track_boxes.append(result_box)
+                    
+                    # output_track_boxes.append(result_box)
                             
                 else:
                     output_track_boxes.append([0, 0, 0, 0])
@@ -1392,18 +1271,18 @@ for current_video_sub_dir in video_sub_dirs:
                     all_points_annotated = True
                     break
                 
-                continue 
+                # continue 
             
             
             
-                # if out_frame_idx <= reprompt_frame_idx:
-                #     all_points_annotated = False
-                #     continue
-                # else:
-                #     reprompt_frame_idx = out_frame_idx
-                #     # print("hi2", current_reprompts, max_reprompts)
-                #     if current_reprompts == max_reprompts:
-                #         continue
+                if out_frame_idx <= reprompt_frame_idx:
+                    all_points_annotated = False
+                    continue
+                else:
+                    reprompt_frame_idx = out_frame_idx
+                    # print("hi2", current_reprompts, max_reprompts)
+                    if current_reprompts == max_reprompts:
+                        continue
                     
                 all_points_annotated = False
                 current_reprompts+=1
@@ -1413,17 +1292,17 @@ for current_video_sub_dir in video_sub_dirs:
                 # print(f"Re-prompting for frame {out_frame_idx} and current reprompt frame {reprompt_frame_idx}")
                     
                 
-                # Load images
-                original_image = Image.open(os.path.join(video_dir, frame_names[0]))
-                previous_image = Image.open(os.path.join(video_dir, frame_names[previous_success_index]))
-                current_image = Image.open(os.path.join(video_dir, frame_names[out_frame_idx]))
+                # # Load images
+                # original_image = Image.open(os.path.join(video_dir, frame_names[0]))
+                # previous_image = Image.open(os.path.join(video_dir, frame_names[previous_success_index]))
+                # current_image = Image.open(os.path.join(video_dir, frame_names[out_frame_idx]))
                 
-                #depth estimation of image 
-                # brighter patches are closer to the camera 
-                # lower values are farther from the camera 
-                with torch.autocast("cuda", dtype=torch.float16):
-                    predictions = pipe(current_image)
-                    depth_prediction = predictions["depth"]
+                # #depth estimation of image 
+                # # brighter patches are closer to the camera 
+                # # lower values are farther from the camera 
+                # with torch.autocast("cuda", dtype=torch.float16):
+                #     predictions = pipe(current_image)
+                #     depth_prediction = predictions["depth"]
                 
                 # need to get the max value of the mask 
                 # need to get the max value of region of interest that is not mask 
@@ -1436,7 +1315,7 @@ for current_video_sub_dir in video_sub_dirs:
                 
                 
                 
-                current_image_np = np.array(current_image)
+                # current_image_np = np.array(current_image)
                 
 
                 # # Check if the closest pixels are within the previous object box plus a threshold
@@ -1454,112 +1333,113 @@ for current_video_sub_dir in video_sub_dirs:
                 # x_max = int(min(x_max, current_image_np.shape[1]))
                 # y_max = int(min(y_max, current_image_np.shape[0]))
                 
-                roi_rgb = current_image_np[y_min:y_max, x_min:x_max]
+                # roi_rgb = current_image_np[y_min:y_max, x_min:x_max]
                 
-                depth_prediction_np = np.array(depth_prediction)
-                roi_depth = depth_prediction_np[y_min:y_max, x_min:x_max]
+                # depth_prediction_np = np.array(depth_prediction)
+                # roi_depth = depth_prediction_np[y_min:y_max, x_min:x_max]
                 
-                # get max value in mask region 
-                mask_depth_full = depth_prediction_np * (previous_mask) 
-                mask_depth_mask = mask_depth_full[y_min:y_max, x_min:x_max]
-                max_depth = np.max(mask_depth_mask)
-                # print(f"Max depth in roi: {max_depth}")
+                # # get max value in mask region 
+                # mask_depth_full = depth_prediction_np * (previous_mask) 
+                # mask_depth_mask = mask_depth_full[y_min:y_max, x_min:x_max]
+                # max_depth = np.max(mask_depth_mask)
+                # # print(f"Max depth in roi: {max_depth}")
                 
-                # get max value in roi_depth that is not in the mask
-                mask_depth_full = depth_prediction_np * (-1+previous_mask) * (-1)
-                mask_depth = mask_depth_full[y_min:y_max, x_min:x_max]
-                # mask_depth = mask_depth.flatten()
-                # mask_depth = mask_depth[mask_depth != 0]
-                max_mask_depth = np.max(mask_depth)
-                # print(f"Max depth not in mask: {max_mask_depth}")
+                # # get max value in roi_depth that is not in the mask
+                # mask_depth_full = depth_prediction_np * (-1+previous_mask) * (-1)
+                # mask_depth = mask_depth_full[y_min:y_max, x_min:x_max]
+                # # mask_depth = mask_depth.flatten()
+                # # mask_depth = mask_depth[mask_depth != 0]
+                # max_mask_depth = np.max(mask_depth)
+                # # print(f"Max depth not in mask: {max_mask_depth}")
                 
-                # larger values mean closer to the camera
-                # so if max_mask_depth is greater than max_depth, then likely that the object is occluded
-                # if max_mask_depth > max_depth:
-                #     print("Object is possibly occluded")
-                
-                
-                # modal_ekf.predict()
-                # best_match_coords = modal_ekf.x[:2].flatten()
-                # best_match_coords = np.round(best_match_coords).astype(int)
+                # # larger values mean closer to the camera
+                # # so if max_mask_depth is greater than max_depth, then likely that the object is occluded
+                # # if max_mask_depth > max_depth:
+                # #     print("Object is possibly occluded")
                 
                 
-                # # make sure the coordinates are within the image size
-                # best_match_coords[0] = int(max(best_match_coords[0], 0))
-                # best_match_coords[1] = int(max(best_match_coords[1], 0))
-                # best_match_coords[0] = int(min(best_match_coords[0], current_image_np.shape[0] - 1))
-                # best_match_coords[1] = int(min(best_match_coords[1], current_image_np.shape[1] - 1))
+                modal_ekf.predict()
+                best_match_coords = modal_ekf.x[:2].flatten()
+                best_match_coords = np.round(best_match_coords).astype(int)
+                
+                
+                # make sure the coordinates are within the image size
+                best_match_coords[0] = int(max(best_match_coords[0], 0))
+                best_match_coords[1] = int(max(best_match_coords[1], 0))
+                best_match_coords[0] = int(min(best_match_coords[0], current_image_np.shape[0] - 1))
+                best_match_coords[1] = int(min(best_match_coords[1], current_image_np.shape[1] - 1))
                 
                 
                 
-                # frame_idx , out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
-                #     inference_state=inference_state,
-                #     frame_idx=out_frame_idx,
-                #     obj_id=ann_obj_id,
-                #     points= np.array([best_match_coords], dtype=np.float32),
+                frame_idx , out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
+                    inference_state=inference_state,
+                    frame_idx=out_frame_idx,
+                    obj_id=ann_obj_id,
+                    points= np.array([best_match_coords], dtype=np.float32),
 
-                #     labels= np.array([1], np.int32), # 1 is positive, 0 is negative 
-                #     # box = box,
-                # )
+                    labels= np.array([1], np.int32), # 1 is positive, 0 is negative 
+                    # box = box,
+                )
                 
-                
-                # plot original image, previous image, current image
-                fig, ax = plt.subplots(1, 6, figsize=(20, 5))
-                ax[0].imshow(original_image)
-                show_mask(binary_mask, ax[0], obj_id=ann_obj_id)  # Use show_mask function
-                ax[0].set_title("Original Image")
-                rect = patches.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1], linewidth=2, edgecolor='r', facecolor='none')
-                ax[0].add_patch(rect)
+                viz_results = False
+                if viz_results:
+                    # plot original image, previous image, current image
+                    fig, ax = plt.subplots(1, 6, figsize=(20, 5))
+                    ax[0].imshow(original_image)
+                    show_mask(binary_mask, ax[0], obj_id=ann_obj_id)  # Use show_mask function
+                    ax[0].set_title("Original Image")
+                    rect = patches.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1], linewidth=2, edgecolor='r', facecolor='none')
+                    ax[0].add_patch(rect)
 
 
-                ax[1].imshow(previous_image)
-                show_mask(previous_mask, ax[1], obj_id=ann_obj_id)  # Use show_mask function
-                ax[1].set_title("Previous Image")
-                prev_box = output_track_boxes[-1]
-                rect = patches.Rectangle((prev_box[0], prev_box[1]), prev_box[2] - prev_box[0], prev_box[3] - prev_box[1], linewidth=2, edgecolor='r', facecolor='none')
-                ax[1].add_patch(rect)
-                box_base_gt = [int(x) for x in lines[out_frame_idx-1].strip().split()]
-                box_base_gt = np.array(box_base_gt, dtype=np.float32)
-                x_min_gt, y_min_gt, width_gt, height_gt = box_base_gt
-                x_max_gt = x_min_gt + width_gt
-                y_max_gt = y_min_gt + height_gt
-                rect_gt = patches.Rectangle((x_min_gt, y_min_gt), x_max_gt - x_min_gt, y_max_gt - y_min_gt, linewidth=2, edgecolor='b', facecolor='none')
-                ax[1].add_patch(rect_gt)
+                    ax[1].imshow(previous_image)
+                    show_mask(previous_mask, ax[1], obj_id=ann_obj_id)  # Use show_mask function
+                    ax[1].set_title("Previous Image")
+                    prev_box = output_track_boxes[-1]
+                    rect = patches.Rectangle((prev_box[0], prev_box[1]), prev_box[2] - prev_box[0], prev_box[3] - prev_box[1], linewidth=2, edgecolor='r', facecolor='none')
+                    ax[1].add_patch(rect)
+                    box_base_gt = [int(x) for x in lines[out_frame_idx-1].strip().split()]
+                    box_base_gt = np.array(box_base_gt, dtype=np.float32)
+                    x_min_gt, y_min_gt, width_gt, height_gt = box_base_gt
+                    x_max_gt = x_min_gt + width_gt
+                    y_max_gt = y_min_gt + height_gt
+                    rect_gt = patches.Rectangle((x_min_gt, y_min_gt), x_max_gt - x_min_gt, y_max_gt - y_min_gt, linewidth=2, edgecolor='b', facecolor='none')
+                    ax[1].add_patch(rect_gt)
 
+                        
+                    ax[2].imshow(current_image)
+                    # ax[2].scatter(best_match_coords[1], best_match_coords[0], color='red', marker='x', s=100)  # Add marker for best match
+                    show_mask(previous_mask, ax[2], obj_id=ann_obj_id)  # Use show_mask function
+                    ax[2].set_title(f"Current Image for frame {out_frame_idx}")
+                    rect = patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, linewidth=2, edgecolor='r', facecolor='none')
+                    ax[2].add_patch(rect)
                     
-                ax[2].imshow(current_image)
-                # ax[2].scatter(best_match_coords[1], best_match_coords[0], color='red', marker='x', s=100)  # Add marker for best match
-                show_mask(previous_mask, ax[2], obj_id=ann_obj_id)  # Use show_mask function
-                ax[2].set_title(f"Current Image for frame {out_frame_idx}")
-                rect = patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, linewidth=2, edgecolor='r', facecolor='none')
-                ax[2].add_patch(rect)
+                    box_base_gt = [int(x) for x in lines[out_frame_idx].strip().split()]
+                    box_base_gt = np.array(box_base_gt, dtype=np.float32)
+                    x_min_gt, y_min_gt, width_gt, height_gt = box_base_gt
+                    x_max_gt = x_min_gt + width_gt
+                    y_max_gt = y_min_gt + height_gt
+                    rect_gt = patches.Rectangle((x_min_gt, y_min_gt), x_max_gt - x_min_gt, y_max_gt - y_min_gt, linewidth=2, edgecolor='b', facecolor='none')
+                    ax[2].add_patch(rect_gt)
+                                    
+                                    
                 
-                box_base_gt = [int(x) for x in lines[out_frame_idx].strip().split()]
-                box_base_gt = np.array(box_base_gt, dtype=np.float32)
-                x_min_gt, y_min_gt, width_gt, height_gt = box_base_gt
-                x_max_gt = x_min_gt + width_gt
-                y_max_gt = y_min_gt + height_gt
-                rect_gt = patches.Rectangle((x_min_gt, y_min_gt), x_max_gt - x_min_gt, y_max_gt - y_min_gt, linewidth=2, edgecolor='b', facecolor='none')
-                ax[2].add_patch(rect_gt)
-                                
-                                
-             
-                ax[3].imshow(depth_prediction)
-                ax[3].set_title("Current Depth Image")
-                rect = patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, linewidth=2, edgecolor='r', facecolor='none')
-                ax[3].add_patch(rect)
-                
-                ax[4].imshow(mask_depth_mask)
-                
-                ax[5].imshow(mask_depth)
-                
-                plt.show()
+                    ax[3].imshow(depth_prediction)
+                    ax[3].set_title("Current Depth Image")
+                    rect = patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, linewidth=2, edgecolor='r', facecolor='none')
+                    ax[3].add_patch(rect)
+                    
+                    ax[4].imshow(mask_depth_mask)
+                    
+                    ax[5].imshow(mask_depth)
+                    
+                    plt.show()
                 
                 
                 previous_mask = result_mask*0
                 
                 
-                # break
+                break
                 
          
         # find where lines of output_track_boxes are [0, 0, 0, 0]

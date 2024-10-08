@@ -457,6 +457,11 @@ relative_path_to_hsi = "../../../HSI-VIS"
 # # video_base_dir = "../hsi_tracking/datasets/validation/HSI-RedNIR-FalseColor/duck4"
 # # relative_path_to_hsi = "../../HSI-RedNIR"
 
+results_output_dir = "notebooks/results/ranking/HSI-NIR-FalseColor"
+# video_base_dir = "../hsi_tracking/datasets/HSI-NIR-FalseColor"
+video_base_dir = "../hsi_tracking/datasets/too_large"
+relative_path_to_hsi = "../../../HSI-NIR"
+
 # num_bands = 16 # 1, 25 (16 vis, 25 nir, 16 rednir (last column all zeros))
 num_bands = 16
 
@@ -619,7 +624,8 @@ for current_video_sub_dir in video_sub_dirs:
     # load the initialization box from the ground truth (assumes same for all video directories)
     try:
         # read the file 
-        ground_truth_file = os.path.join(video_dir, "groundtruth_rect.txt")
+        # ground_truth_file = os.path.join(video_dir, "groundtruth_rect.txt")
+        ground_truth_file = os.path.join(video_dir, "init_rect.txt")
         with open(ground_truth_file, 'r') as f:
             lines = f.readlines()
             # box = [int(x) for x in lines[0].split(',')] # '463\t146\t13\t10\t\n'
@@ -1193,7 +1199,7 @@ for current_video_sub_dir in video_sub_dirs:
                 else:
                     raise Exception("No object detected")
                 
-                # if out_frame_idx >=2:
+                # if out_frame_idx >=4:
                 #     raise Exception("testing")
                 
             except:
@@ -1271,7 +1277,7 @@ for current_video_sub_dir in video_sub_dirs:
                     all_points_annotated = True
                     break
                 
-                # continue 
+                continue 
             
             
             
@@ -1293,9 +1299,9 @@ for current_video_sub_dir in video_sub_dirs:
                     
                 
                 # # Load images
-                # original_image = Image.open(os.path.join(video_dir, frame_names[0]))
-                # previous_image = Image.open(os.path.join(video_dir, frame_names[previous_success_index]))
-                # current_image = Image.open(os.path.join(video_dir, frame_names[out_frame_idx]))
+                original_image = Image.open(os.path.join(video_dir, frame_names[0]))
+                previous_image = Image.open(os.path.join(video_dir, frame_names[previous_success_index]))
+                current_image = Image.open(os.path.join(video_dir, frame_names[out_frame_idx]))
                 
                 # #depth estimation of image 
                 # # brighter patches are closer to the camera 
@@ -1398,13 +1404,13 @@ for current_video_sub_dir in video_sub_dirs:
                     prev_box = output_track_boxes[-1]
                     rect = patches.Rectangle((prev_box[0], prev_box[1]), prev_box[2] - prev_box[0], prev_box[3] - prev_box[1], linewidth=2, edgecolor='r', facecolor='none')
                     ax[1].add_patch(rect)
-                    box_base_gt = [int(x) for x in lines[out_frame_idx-1].strip().split()]
-                    box_base_gt = np.array(box_base_gt, dtype=np.float32)
-                    x_min_gt, y_min_gt, width_gt, height_gt = box_base_gt
-                    x_max_gt = x_min_gt + width_gt
-                    y_max_gt = y_min_gt + height_gt
-                    rect_gt = patches.Rectangle((x_min_gt, y_min_gt), x_max_gt - x_min_gt, y_max_gt - y_min_gt, linewidth=2, edgecolor='b', facecolor='none')
-                    ax[1].add_patch(rect_gt)
+                    # box_base_gt = [int(x) for x in lines[out_frame_idx-1].strip().split()]
+                    # box_base_gt = np.array(box_base_gt, dtype=np.float32)
+                    # x_min_gt, y_min_gt, width_gt, height_gt = box_base_gt
+                    # x_max_gt = x_min_gt + width_gt
+                    # y_max_gt = y_min_gt + height_gt
+                    # rect_gt = patches.Rectangle((x_min_gt, y_min_gt), x_max_gt - x_min_gt, y_max_gt - y_min_gt, linewidth=2, edgecolor='b', facecolor='none')
+                    # ax[1].add_patch(rect_gt)
 
                         
                     ax[2].imshow(current_image)
@@ -1414,13 +1420,13 @@ for current_video_sub_dir in video_sub_dirs:
                     rect = patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, linewidth=2, edgecolor='r', facecolor='none')
                     ax[2].add_patch(rect)
                     
-                    box_base_gt = [int(x) for x in lines[out_frame_idx].strip().split()]
-                    box_base_gt = np.array(box_base_gt, dtype=np.float32)
-                    x_min_gt, y_min_gt, width_gt, height_gt = box_base_gt
-                    x_max_gt = x_min_gt + width_gt
-                    y_max_gt = y_min_gt + height_gt
-                    rect_gt = patches.Rectangle((x_min_gt, y_min_gt), x_max_gt - x_min_gt, y_max_gt - y_min_gt, linewidth=2, edgecolor='b', facecolor='none')
-                    ax[2].add_patch(rect_gt)
+                    # box_base_gt = [int(x) for x in lines[out_frame_idx].strip().split()]
+                    # box_base_gt = np.array(box_base_gt, dtype=np.float32)
+                    # x_min_gt, y_min_gt, width_gt, height_gt = box_base_gt
+                    # x_max_gt = x_min_gt + width_gt
+                    # y_max_gt = y_min_gt + height_gt
+                    # rect_gt = patches.Rectangle((x_min_gt, y_min_gt), x_max_gt - x_min_gt, y_max_gt - y_min_gt, linewidth=2, edgecolor='b', facecolor='none')
+                    # ax[2].add_patch(rect_gt)
                                     
                                     
                 

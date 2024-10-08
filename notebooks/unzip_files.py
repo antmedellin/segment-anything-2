@@ -22,8 +22,9 @@ def unzip_files(zip_file_path, extract_to):
                 unzip_files(os.path.join(extract_to, file_info.filename), nested_folder)
 
 # Example usage
-zip_file_path = '/home/anthony/HyperWorkspace/hsi_tracking/training.zip'
-extract_to = '/home/anthony/HyperWorkspace/hsi_tracking/'
+# zip_file_path = '/home/anthony/HyperWorkspace/hsi_tracking/training.zip'
+zip_file_path = '/workspaces/hsi_tracking/datasets/ranking.zip'
+extract_to = '/workspaces/hsi_tracking/datasets/'
 
 unzip_files(zip_file_path, extract_to)
 print('Files extracted successfully.')
